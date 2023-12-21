@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+
+for my $f (@ARGV) {
+	my ($b, $e) = ($f =~ /(.*)\.(.+)/);
+	if (!defined $e) {
+		print STDERR "Can't parse $f\n";
+		next;
+	}
+	my ($fv, $fa, $fs);
+	for (qw(m4v webmv mp4v ts mp4)) {
+		my $F = "$b.$_";
+		if (-f $F) {
+			$fv = $F;
+			last;
+		}
+	}
+	for (qw(m4a aac webma opus webm)) {
+		my $F = "$b.$_";
+		if (-f $F) {
+			$fa = $F;
+			last;
+		}
+	}
+	for (qw(srt)) {
+		my $F = "$b.$_";
+		if (-f $F) {
+			$fs = $F;
+			last;
+		}
+	}
+	if (!defined $fv) {
+		print STDERR "did not find adequate video stream file for $f\n";
+		next;
+	}
+	if (!defined $fa) {
+		print STDERR "did not find adequate audio stream file for $f\n";
+		next;
+	}
+	if ($fv eq $fa) {
+		print STDERR "did not find adequate pair of files for $f\n";
+		print STDERR "found $fv\n";
+		next;
+	}
+	
+	if (defined $fs) {
+		print STDERR "did find subtitles in $fs\n";
+		print "avconv -i \"$fv\" -i \"$fa\" -i \"$fs\" -codec copy \"$b\".mkv\n";
+		if (!system{"avconv"}("avconv", "-hide_banner", "-i", $fv, "-i", $fa, "-i", $fs, "-codec", "copy", "$b.mkv")) {
+			print "rm $fv\nrm $fa\nrm $fs\n";
+			unlink($fv);
+			unlink($fa);
+			unlink($fs);
+		}
+	} else {
+		print "avconv -i \"$fv\" -i \"$fa\" -codec copy \"$b\".mkv\n";
+		if (!system{"avconv"}("avconv", "-hide_banner", "-i", $fv, "-i", $fa, "-codec", "copy", "$b.mkv")) {
+			print "rm $fv\nrm $fa\n";
+			unlink($fv);
+			unlink($fa);
+		}
+	}
+}
