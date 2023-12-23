@@ -2,48 +2,158 @@
 use warnings;
 use strict;
 
+
+sub dirname($) {
+	my $f = $_[0];
+	return $1 if $f =~ m,^(.*/),;
+	return '.';
+}
+
+sub deleteFromArray_eq(\@$) {
+	my ($a, $needle);
+	for (my $i=0; $i < @$a; $i++) {
+		if ($a->[$i] eq $needle) {
+			splice(@$a, $i, 1);
+			last;
+}	}	}
+
+my %dircache;
+sub get_direntries($) {
+	my $d = $_[0];
+	my $cached = $dircache{$d};
+	return $cached if $cached;
+	opendir(my $dh, $d);
+	my $direntries;
+	if (defined $dh) {
+		$direntries = [ (readdir($dh)) ];
+		closedir($dh);
+	} else {
+		print STDERR "Can't open $d: $!\n";
+		$direntries = [];
+	}
+	$dircache{$d} = $direntries;
+	return $direntries;
+}
+
 for my $f (@ARGV) {
-	my ($b, $e) = ($f =~ /(.*)\.(.+)/);
-	if (!defined $e) {
+	my ($fb, $fe) = ($f =~ /(.*)\.([^.]+)/);
+	if (!defined $fe) {
 		print STDERR "Can't parse $f\n";
 		next;
 	}
-	my ($fv, $fa, $fs);
-	for (qw(m4v webmv mp4v ts mp4)) {
-		my $F = "$b.$_";
-		if (-f $F) {
-			$fv = $F;
-			last;
-		}
-	}
-	for (qw(m4a aac webma opus webm)) {
-		my $F = "$b.$_";
-		if (-f $F) {
-			$fa = $F;
-			last;
-		}
-	}
-	for (qw(srt)) {
-		my $F = "$b.$_";
-		if (-f $F) {
-			$fs = $F;
-			last;
-		}
-	}
-	if (!defined $fv) {
-		print STDERR "did not find adequate video stream file for $f\n";
+
+	my $dirname = dirname($f);
+	my $direntries = get_direntries($dirname);
+	$f =~ s,^.*/,,;
+
+	my (@fv, @fa, @fs, %unlink, %notunlink);
+	for my $g (@$direntries) {
+		for my $ext (qw(m4v webmv mp4v ts)) {
+			if ($g =~ m,^\Q$fb\E(.*)\.$ext$,) {
+				my $fvextra = $1;
+				push(@fv, [$fb, $g, $fvextra]);
+				print "Video: $g\n";
+		}	}
+		for my $ext (qw(m4a aac webma opus webm)) {
+			if ($g =~ m,^\Q$fb\E(.*)\.$ext$,) {
+				my $faextra = $1;
+				push(@fa, [$g, $faextra]);
+				print "Audio: $g\n";
+		}	}
+		for my $ext (qw(mp4 webm)) {
+			if ($g =~ m,^\Q$fb\E(.*)\.$ext$,) {
+				my $fxextra = $1;
+				if (@fv) {
+					push(@fa, [$g, $fxextra]);
+					print "Audio: $g\n";
+				} else {
+					push(@fv, [$fb, $g, $fxextra]);
+					print "Video: $g\n";
+				}
+		}	}
+		for my $ext (qw(srt)) {
+			if ($g =~ m,\Q$fb\E(.*)\.$ext$,) {
+				my $fsextra = $1;
+				push(@fs, [$g, $fsextra]);
+				print "Subtitle: $g\n";
+		}	}
+	} # for my $g (@$direntries)
+	
+	if (!@fv) {
+		print STDERR "did not find adequate video stream file for $f in $dirname\n";
 		next;
 	}
-	if (!defined $fa) {
-		print STDERR "did not find adequate audio stream file for $f\n";
+	if (!@fa) {
+		print STDERR "did not find adequate audio stream file for $f in $dirname\n";
 		next;
 	}
-	if ($fv eq $fa) {
-		print STDERR "did not find adequate pair of files for $f\n";
-		print STDERR "found $fv\n";
-		next;
+	for my $fv (@fv) {
+		my @cmd_fv = ("avconv", "-hide_banner", "-i", $fv->[1]);
+		my @cmd_fa = ();
+		my @cmd_fs = ();
+		my @la = ();
+		my @ls = ();
+		my $b = $fv->[0];
+		my @b = split(/ - /, $fb);
+		my @files = ($fv->[1]);
+		for my $fa (@fa) {
+			my $extra = $fa->[1];
+			$extra =~ s/^\s+//;
+			$extra =~ s/\s+$//;
+			if ($extra =~ /^[a-z]+$/) {
+				if (@b) {
+					$b[@b-1] =~ s/\b{wb}\Q$extra\E\b{wb}\s?//;
+				}
+				push(@la, $extra);
+			}
+			push (@cmd_fa, "-i", $fa->[0]);
+			push(@files, $fa->[0]);
+		}
+		for my $fs (@fs) {
+			my $extra = $fs->[1];
+			$extra =~ s/^\s+//;
+			$extra =~ s/\s+$//;
+			if ($extra =~ /^[a-z]+$/) {
+				push(@ls, $extra);
+			}
+			push (@cmd_fs, "-i", $fs->[0]);
+			push(@files, $fs->[0]);
+		}
+		if (@b)
+			{ $b = join(' - ', @b); };
+		if (@la)
+			{ $b = $b . " " . join(',', @la); }
+		if (@ls)
+			{ $b = $b . " st=" . join(',', @ls); }
+		if (defined $fv->[2] && $fv->[2] ne "")
+			{ $b = "$b $fv->[2]"; }
+		$b =~ s/  / /g;
+		$b =~ s/\s+$//g;
+		my $fv_name = "$b.mkv";
+		if ($fe eq "mkv")
+			{ $fv_name .= ".mkv"; }
+		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, '-c', 'copy', $fv_name);
+		print join(' ', @cmd), "\n";
+
+		if (!system{$cmd[0]}(@cmd)) {
+			for my $f (@files)
+				{ $unlink{$f} = 1; }
+		} else {
+			for my $f (@files)
+				{ $notunlink{$f} = 1; }
+		}
+	}
+	for my $df (keys %unlink) {
+		if ($notunlink{$df}) {
+			print "keeping $df because of transcoding error\n";
+		} else {
+			print "rm $df\n";
+			unlink($df);
+		}
 	}
 	
+=pod
+old code
 	if (defined $fs) {
 		print STDERR "did find subtitles in $fs\n";
 		print "avconv -i \"$fv\" -i \"$fa\" -i \"$fs\" -codec copy \"$b\".mkv\n";
@@ -61,4 +171,5 @@ for my $f (@ARGV) {
 			unlink($fa);
 		}
 	}
+=cut
 }
