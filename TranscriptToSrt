@@ -1,0 +1,147 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+
+use DateTime;
+
+my $idx = 0;
+my $start;
+my $text;
+
+sub getTimeRange {
+	my ($start, $now) = @_;
+	die if !defined $start;
+	my $dstart = DateTime->new(
+		year   => 0,
+		hour   => $start->[0],
+		minute => $start->[1],
+		second => $start->[2],
+	);
+	my $dten = $dstart->clone()->add(seconds=>10);
+	my $dend;
+	if (defined $now) {
+		my $dnow = DateTime->new(
+			year   => 0,
+			hour   => $now->[0],
+			minute => $now->[1],
+			second => $now->[2],
+		);
+		my $diff = DateTime::compare($dten, $dnow);
+		$dend = $diff < 0? $dten : $dnow;
+	} else {
+		$dend = $dten;
+	}
+	$dten = undef;
+	return $dstart->hms() . ",0 --> " . $dend->hms() . ",0";
+}
+
+sub printLastSub {
+	my ($now) = @_;
+
+	if (defined $text) {
+		my $timerange = getTimeRange($start, $now);
+		print "$idx\n$timerange\n$text\n\n";
+		$idx++;
+		$text  = undef;
+	}
+	$start = $now;
+}
+
+sub addSub {
+	my ($now, $newtext) = @_;
+	printLastSub($now);
+	$text = $newtext;
+}
+
+my $timeSeen;
+my $mode = 0;
+
+sub newSRT {
+	$idx = 1;
+	$start = $text = undef;
+	$timeSeen = undef;
+}
+
+local $/;
+$/ = "\n";
+
+
+my $fileidx = 1;
+my $oldargv = "-";
+my $srtnamebase;
+my $srtname;
+my $file_open = 1; # stdout
+
+sub openSRT {
+	return if $file_open;
+	open(ARGVOUT, ">$srtname");
+	select(ARGVOUT);
+	$file_open = 1;
+	print STDERR "opened $srtname\n";
+}
+
+sub flushSRT {
+	return if !defined $text;
+	openSRT();
+	printLastSub();
+}
+
+LINE: while (<>) {
+
+	if ($ARGV ne $oldargv) {
+
+		flushSRT();
+		
+		$srtnamebase = $ARGV;
+		if ($srtnamebase eq "-") {
+			select(STDOUT);
+			$file_open = 1;
+		} else {
+			$srtnamebase =~ s/.txt$//;
+			$srtname = "$srtnamebase.srt";
+			$fileidx = 1;
+			$file_open = 0;
+		}
+		$oldargv = $ARGV;
+
+		newSRT();
+		$mode = 0;
+	}
+
+	s/\r/\n/g;
+	chomp;chomp;
+	
+	if (($mode == 0) && /^Transcript\s*$/) {
+		$mode = 1;
+	} elsif ($mode == 1 && /^\s*(\d+):(\d+)\s*$/) {
+		$timeSeen = [0, $1, $2];
+	} elsif ($mode == 1 && /^\s*(\d+):(\d+):(\d+)\s*$/) {
+		$timeSeen = [$1, $2, $3];
+	} elsif ($mode == 1 && defined $timeSeen && /^Transcript\s*$/) {
+		if ($idx > 1) {
+
+			flushSRT();
+
+			$fileidx++;
+			if ($srtnamebase eq "-") {
+				print STDERR "Achtung, zweites Transcript?\n" if $fileidx == 2;
+			} else {
+				$srtname = "$srtnamebase.$fileidx.srt";
+				$file_open = 0;
+			}
+
+			newSRT();
+		}
+	} elsif ($mode == 1 && defined $timeSeen) {
+		s/\[\s*(?:Musik|Music|Applaus)\s*\]\s*//ig;
+		s/^\s+//;
+		s/\s+$//;
+		if (/\S/) {
+			openSRT();
+			addSub($timeSeen, $_);
+		}
+	}
+}
+flushSRT();
+select(STDOUT);
+# automatically close files by exiting
