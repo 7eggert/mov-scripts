@@ -1,0 +1,237 @@
+#!/usr/bin/perl -CLDSA
+
+use strict;
+use utf8;
+use File::Glob ':bsd_glob';
+#binmode STDIN, ":encoding(UTF-8)";
+#binmode STDOUT, ":encoding(UTF-8)";
+
+my $srt_re = qr/\.(srt|vtt|ttml)$/;
+
+my $delete_these_prefixes = <<EOF;
+3sat
+3sat Filmkultur
+3sat Wissenschaftsdoku
+Aktuelles Und Gesellschaft
+Alpha-doku
+ARD Wissen
+ARTE Concert - Pop
+BR
+Comedy & Satire
+Comedy & Satire im Ersten
+Das Erste
+Der Fernsehfilm Der Woche
+DokFilm
+DokThema
+Doku
+Doku @ ONE
+Doku & Reportage
+Doku In Einsfestival
+Doku Plus
+Doku-Reihe
+Doku-Serie
+Dokumentarfilm
+Dokumentarfilme
+Dokumentation
+Dokumentation Und Reportage
+Dokumentationen
+Dokumentationen Und Reportagen
+Dokus Im Ersten
+Dokus Und Reportagen
+Einzelbeitrag SWR Fernsehen
+Entdeckung
+Entdeckung Der Welt - Leben Anderswo
+Entdeckung Der Welt - Natur Und Tiere
+Entdeckung Der Welt - Reisen
+Erstaustrahlungen Bei ZDFinfo
+Erstausstrahlungen Bei ZDFinfo
+Fernsehfilm
+Fernsehfilme
+Fernsehfilme Und Serien
+Fernsehserie
+Film
+Film & Serie
+Film & Serie In Einsfestival
+Film Ab!
+Film Im NDR
+Film Im Rbb
+Film Und Serie
+Filme
+Filme & Serien Am Nachmittag
+Filme, Dokus, Kabarett
+Filme Im Ersten
+Filme Im MDR
+Filmgrößen
+Ganze Filme Im ZDF
+Geschichte - Biographien
+Geschichte - Die Zeit Vor Dem 20. Jahrhundert
+Geschichte - Das 20. Jahrhundert
+Geschichte & Entdeckungen
+Geschichtsdokumentationen
+Jugend
+Kabarett
+Kinder & Jugend
+Kinderfilme Und Kinderdokus
+Kino
+Kinozeit
+Kissenkino
+Kissenkino Im MDR
+Krimi Und Thriller
+Krimis Im Ersten
+Kultur & Religion
+Kultur Und Pop - Kunst
+Kultur Und Pop - Popkultur
+Magazin
+MDR Dok
+MDR+
+Musik und Theater
+Natur
+Naturfilme
+NDR Dokfilm
+Politik & Gesellschaft
+Politik Und Gesellschaft
+Rbb Fernsehen
+Reportage & Dokumentation
+Reportagen Und Recherchen
+Serien
+Séries et fictions - Séries
+Spielfilm
+Spielfilm-Highlights
+Terra X
+Tiere
+Unterhaltung
+WDR
+WDR.DOK
+Wissenschaft - Gesundheit Und Medizin
+Wissenschaft - Technik Und Innovation
+Wissenschaft - Umwelt Und Natur
+Wissenschaft - Wissen Kompakt
+Wissenschaftsdoku
+ZDF-History
+ZDFinfo
+ZDFinfo Doku
+ZDFneo
+ZDFzeit
+EOF
+
+sub gen_re($@);
+sub gen_re($@){
+	my $quote=shift;
+	if(!@_){return '\000'}
+	my @A=@_;
+	my $re="";
+	my $hasempty=0;
+	
+	if(grep($_ eq '',@A)){
+		if(@A==2){
+			my $s="$A[0]$A[1]";
+			if(length($s)==1){return "\Q$s\E?"}
+			else{return "(?:\Q$s\E)?"}
+		}
+		@A=grep($_ ne '',@A);
+		$hasempty=1;
+	}
+	
+	my $atom=1;
+	if((my @B=grep(/^.$/,@A))>1){
+		my $s=join('',@B);
+		$s=~s/(.)\1+/$1/g;
+		$s=~s/(\W)/"\\x".unpack('H2',$1)/ge;
+		$re.="|[$s]";
+		if($hasempty){$re.="?"}
+		@A=grep(!/^.$/,@A);
+		if(!@A){return substr($re,1)}
+		$atom=0;
+	}elsif($hasempty){
+		$re="|";
+		$atom=0;
+	}
+	
+	while(@A){
+#		print "<",join(',',@A),"> ($re)\n";
+		my $s=$A[0];
+		if(@A==1){
+			$re.="|\Q$s\E";
+			last;
+		}
+		
+		my $l=1;
+		my $c=substr($s,0,1);
+		my @n=grep(/^\Q$c\E/,@A);
+		if(@n>1){
+			for(my $i=2;$i<length($s);$i++){
+				my $cc=substr($s,0,$i);
+				my @nn=grep(/^\Q$cc\E/,@A);
+				if(scalar @nn<scalar @n){last}
+				$c=$cc;$l=$i;
+			}
+			@A=grep(!/^\Q$c\E/,@A);
+			map(s/^\Q$c\E//,@n);
+			$re.="|\Q$c\E".gen_re($quote+1,@n);
+			if(@A){$re.="\n".(" " x $quote)}
+#			print "$l#".join(',',@n)."#$c\n";
+		}else{ #$n=1
+			$re.="|\Q$s\E\n".(' ' x $quote);
+			shift(@A);
+		}
+		if(@A){$atom=0}
+	}
+	if($re eq ""){return "#err#"}
+	if($quote && !$atom){return "(?:".substr($re,1).")"}
+	return substr($re,1);
+}
+
+my $prefix_re = "(?x:".gen_re(0, split(/\n/, $delete_these_prefixes)).")";
+#die "$prefix_re";
+
+for my $f (@ARGV) {
+	my $F = $f;
+	my $recode=0; # srt
+	$F =~ s/\xa0/ /g;
+	$F =~ s/^$prefix_re - //i;
+	$F =~ s/\.mp4\.(ttml|txt|html|xml)$/.$1/;
+	($F =~ s/\.mp4\.(?:tt|ht|x)ml.srt$/.srt/) && ($recode=1);
+	$F =~ / - / || $F =~ s/\b: / - /;
+	$F =~ s/^./\u$&/; $F =~ s/\s\S/\U$&/g; $F =~s/\bOf\b/of/g;
+	$F =~ s/^(([^-:]+?): ([^-:]+?)) - \1/$2 - $3/;
+	$F =~ s/^(.*?) - \1: /$1 - /;
+	$F =~ s/^(.*?) - Faszination Erde Mit Dirk Steffens\b/Faszination Erde - $1/;
+#	if ($F =~ /\((?:Folge )?(\d+)__(\d+)(,[^)]+)?\)/) {
+#		my ($m, $n) = ($1, $2);
+#		my $l = length($n);
+#		$F =~ s/\((?:Folge )?(\d+)__(\d+)(,[^)]+)?\)/sprintf("- %$l.${l}d of %d%s", $m, $n, $3)/e;
+#	}
+	$F =~ s/ - ([^-]*)\s*\((?:Folge )?(\d+)__(\d+)(?:,\s*([^)]+))?\)/my $l=length($2);sprintf(" - %$l.${l}d of %d %s %s", $2, $3, $1, $4?" - ".$4:"")/e
+	|| $F =~ s/\s*\((?:Folge )?(\d+)__(\d+)(?:,\s*([^)]+))?\)( - )/my $l=length($2);sprintf("%s%$l.${l}d of %d %s", $4||" ", $1, $2, $3?"($3)":"")/e;
+	$F =~ s/\s+/ /g;
+	$F =~ s/ \././g;
+	if ($F =~ $srt_re) {
+		my $FwS = $F; $FwS =~ s/$srt_re/ - *.m??/;
+		$recode=1;
+		# Filename with Size
+		my @with_size = bsd_glob($FwS, GLOB_NOSORT);
+		while (@with_size > 1) {
+			if (length($with_size[0]) > length($with_size[1])) {
+				shift(@with_size);
+			} else {
+				splice(@with_size,1,1);
+			}
+		}
+		my $with_size = $with_size[0];#bsd_glob($FwS, GLOB_NOSORT);
+		utf8::decode($with_size) if utf8::is_utf8($FwS) && defined $with_size; # bug-workaround?
+		if (defined $with_size) {
+			$F =~ /.[^.]*$/;
+			my $ext = $&;
+			$with_size =~ s/.[^.]*$/$ext/ if defined $ext;
+			$F=$with_size;
+		}
+	}
+	if ($F ne $f) {
+		print("$f -> $F\n");
+		#exit 0;
+		system {"/bin/mv"} ("mv", "-i", $f, $F);
+	};
+	#if ($recode) {system {"/usr/bin/recode"} ("recode", "utf8..latin1", $F);}
+	if ($F =~ /\.(mp4|mkv)/i) {system {"/usr/bin/env"} ("env", "vheight", "-r", $F);}
+}
+ 

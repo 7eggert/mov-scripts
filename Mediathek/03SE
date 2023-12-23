@@ -1,0 +1,16 @@
+#!/bin/sh
+
+exec pmv '
+if ( s/ - (.*?) \(S(\d+)__E(\d+)\)/sprintf " - S%dE%2.2d %s", $2, $3, $1/e
+  || s/ - (.*?) \(S(\d+)F(\d+)\)/sprintf " - S%dE%2.2d %s", $2, $3, $1/e
+  || s/ - (\d+) of (\d\d) Staffel (\d)/sprintf " - S%dE%2.2d of %d", $3, $1, $2/e
+  || s/ - (\d) of (\d) Staffel (\d)/sprintf " - S%dE%1.1d of %d", $3, $1, $2/e
+  || s/ - (.*?) \(Staffel (\d+), Folge (\d+)\)/sprintf " - S%dE%2.2d %s", $2, $3, $1/e
+  ) {
+	s/Folge \d+_? ?//;
+} else {
+	s/\((\d)__(\d)\)/- $1 of $2/
+}' -ev "$@"
+#exec pmv '( s/ - (.*?) \(S(\d+)__E(\d+)\)/sprintf " - S%dE%2.2d %s", $2, $3, $1/e || s/ - (.*?) \(S(\d+)F(\d+)\)/sprintf " - S%dE%2.2d %s", $2, $3, $1/e ) && s/Folge \d+_? ?//' -ev "$@"
+exit 0
+# s/' - (S\d+) (.*?) - (\d) of (\d)/ - $1E$3 of $4 $2/'

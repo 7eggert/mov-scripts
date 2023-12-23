@@ -1,0 +1,159 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+#my @Audio = ("mit Audiodeskription", qw(Audiodeskription Englisch Hörfassung Hörfilm Originalversion \(Originalversion\) Französisch \(Französisch\)));
+my @Audios = ( [ "Deutsch mit Audiodeskription", "ger", "+H", [ "Mit Audiodeskription", qw(Audiodeskription Hörfassung Hörfilm) ] ],
+               [ "Klare Sprache", "ger", "+K", [ "Klare Sprache" ] ],
+               [ "English", "eng", ",en", [ qw(Englisch Originalversion OV), "Originalversion Mit Untertitel", "OV - English" ] ],
+               [ "Danish", "dan", ",dk", [ qw(dan) ] ],
+               [ "Français", "fre", ",fr", [ qw(Französisch) ] ],
+               [ "Norwegian", "nor", ",no", [ qw(nor) ] ],
+               [ "Swedish", "swe", ",sv", [ qw(swe) ] ],
+);
+my @extraext = (qw(txt));
+my @extraextres = (qw(ttml));
+
+for my $f (@ARGV) {
+	my $f_orig = $f;
+	my @Audiotracks = ();
+
+	if ($f !~ /(.*?) - (\d+p)?\.([\w\d]+)$/) {
+		print "Expecting a filename with a video height, got:\n$f\n\n";
+		next;
+	}
+	my ($basenamestart, $resolution, $ext) = ($1,$2,$3);
+	$resolution = "" if !defined $resolution;
+
+	for my $Audio (@Audios) {
+		my @AudioRec = @$Audio;
+		my @Audio = @{$AudioRec[3]};
+
+		my $Audiodeskription;
+		my $g;
+		for $Audiodeskription (@Audio) {
+			$g = "$basenamestart ($Audiodeskription) - $resolution";
+			goto found if -e "$g.$ext";
+			$g = "$basenamestart (\l$Audiodeskription) - $resolution";
+			goto found if -e "$g.$ext";
+			$g = "$basenamestart($Audiodeskription) - $resolution";
+			goto found if -e "$g.$ext";
+			$g = "$basenamestart - ($Audiodeskription) - $resolution";
+			goto found if -e "$g.$ext";
+			$g = "$basenamestart - $Audiodeskription - $resolution";
+			goto found if -e "$g.$ext";
+			$g = "$basenamestart - $Audiodeskription $resolution";
+			goto found if -e "$g.$ext";
+			$g = "$basenamestart, $Audiodeskription - $resolution";
+			goto found if -e "$g.$ext";
+		}
+		print("not found: $basenamestart (", join("|",@Audio),") - $resolution.$ext\n");
+		next;
+		found:
+		push @Audiotracks, [ "$g.$ext", $AudioRec[0], $AudioRec[1], $AudioRec[2], $g ];
+		print "found  $AudioRec[0]: $g.$ext\n"
+	}
+	
+	# no "... (Hörfilm) etc. in $f
+	my $srt;
+	for my $srtext (qw(srt vtt ttml)) {
+		$srt = $f;
+		$srt =~ s/(.*)\.([\w\d]+)$/$1.$srtext/;
+		if (!-e $srt) {
+			$srt = $f_orig;
+			$srt =~ s/(.*)\.([\w\d]+)$/$1.$srtext/;
+			#print "looking for $srt\n";
+			if (!-e $srt) {
+				$srt = undef;
+				for my $Audio (@Audiotracks) {
+					# Jede SRT ist in Deutsch
+					my @AudioRec = @$Audio;
+					$srt = $AudioRec[4].".$srtext";
+					print "looking for $srt\n";
+					last if -e $srt;
+					$srt = undef;
+				}
+			}
+		}
+		if (defined $srt) {
+			print "found \U$srtext\E $srt\n" if defined $srt;
+			last;
+		}
+	}
+	
+	if (!@Audiotracks && !defined $srt) {
+		print "Skipping\n";
+		next;
+	}
+	
+	my @ins = ("-i", $f);
+	my @maps = ("-map", "0:v", "-map", "0:a");
+	my @meta = ("-metadata:s:a:0", "title=Deutsch",
+	            "-metadata:s:a:0", "language=ger");
+	my $langs = "de";
+	my $index = 1;
+	for my $Audio (@Audiotracks) {
+		my @Audio =@$Audio;
+		push @ins,  ("-i", "$Audio[0]");
+		push @maps, ("-map", "$index:a");
+		push @meta, ("-metadata:s:a:$index", "title=$Audio[1]",
+		             "-metadata:s:a:$index", "language=$Audio[2]");
+		$langs .= $Audio[3];
+		++$index;
+	}
+	if (defined $srt) {
+		push @ins, ("-i", $srt);
+		push @maps, ("-map", "$index");
+		push @meta, ("-metadata:s:s", "title=Deutsch",
+		             "-metadata:s:s", "language=ger");
+		$langs .= " st=de";
+		++$index;
+	}
+
+	my $i = 0;
+	my $E = ".mkv";
+	my $F = "$basenamestart - $langs $resolution$E";
+	while (-e "$F") {
+		++$i;
+		$F = "$basenamestart - $langs $resolution ($i)$E";
+	}
+	print "Destination: $F\n";
+
+	my @cmd = ("avconv", "-hide_banner", @ins, @maps, @meta, qw(-c copy), $F);
+	print("\n", join(" ", @cmd),"\n\n");
+
+	my $sysret = system(@cmd);
+	if ($sysret) {
+		print("WARNING: Command failed with code $sysret\n");
+		if (-z $F) {
+			print "Deleting empty file: $F\n";
+			unlink($F);
+		}
+		next;
+	}
+
+	for my $extraext (@extraext) {
+		my $extraF = "$basenamestart.$extraext";
+		my $extraG = "$basenamestart - $langs.$extraext";
+		   $extraG = "$basenamestart - $langs ($i).$extraext" if $i;
+		#print "Looking for $extraF\n";
+		if (-e $extraF && !-e $extraG) {
+			print "mv $extraF → $extraG\n" unless -e $extraG;
+			rename($extraF, $extraG);
+			
+		}
+	}	
+	
+	for my $extraext (@extraextres) {
+		my $extraF = "$basenamestart - $resolution.$extraext";
+		   $extraF = "$basenamestart.$extraext" if !-e $extraF;
+		my $extraG = "$basenamestart - $langs $resolution.$extraext";
+		   $extraG = "$basenamestart - $langs $resolution ($i).$extraext" if $i;
+		#print "Looking for $extraF\n";
+		if (-e $extraF && !-e $extraG) {
+			print "mv $extraF → $extraG\n";
+			rename($extraF, $extraG);
+		}
+	}	
+	
+}

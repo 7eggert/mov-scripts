@@ -1,0 +1,8 @@
+#!/bin/sh
+for f in "$@"
+do
+	mkvpropedit "$f" -e track:a1 -s name="Deutsch" -s language=ger -e track:a2 -s name="Deutsch mit Audiodeskription" -s language=ger
+	mkvpropedit "$f" -e track:s1 -s name="Deutsch" &&\
+	mkvpropedit "$f" -e track:s2 -s name="Deutsch für Hörgeschädigte"
+	pmv 's/\s\d+p\W/ de+H$&/||s/\./ - de+H./' "$f" -ev
+done
