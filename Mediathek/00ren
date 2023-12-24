@@ -2,6 +2,7 @@
 
 use strict;
 use utf8;
+use BE::GenRE;
 use File::Glob ':bsd_glob';
 #binmode STDIN, ":encoding(UTF-8)";
 #binmode STDOUT, ":encoding(UTF-8)";
@@ -114,74 +115,7 @@ ZDFneo
 ZDFzeit
 EOF
 
-sub gen_re($@);
-sub gen_re($@){
-	my $quote=shift;
-	if(!@_){return '\000'}
-	my @A=@_;
-	my $re="";
-	my $hasempty=0;
-	
-	if(grep($_ eq '',@A)){
-		if(@A==2){
-			my $s="$A[0]$A[1]";
-			if(length($s)==1){return "\Q$s\E?"}
-			else{return "(?:\Q$s\E)?"}
-		}
-		@A=grep($_ ne '',@A);
-		$hasempty=1;
-	}
-	
-	my $atom=1;
-	if((my @B=grep(/^.$/,@A))>1){
-		my $s=join('',@B);
-		$s=~s/(.)\1+/$1/g;
-		$s=~s/(\W)/"\\x".unpack('H2',$1)/ge;
-		$re.="|[$s]";
-		if($hasempty){$re.="?"}
-		@A=grep(!/^.$/,@A);
-		if(!@A){return substr($re,1)}
-		$atom=0;
-	}elsif($hasempty){
-		$re="|";
-		$atom=0;
-	}
-	
-	while(@A){
-#		print "<",join(',',@A),"> ($re)\n";
-		my $s=$A[0];
-		if(@A==1){
-			$re.="|\Q$s\E";
-			last;
-		}
-		
-		my $l=1;
-		my $c=substr($s,0,1);
-		my @n=grep(/^\Q$c\E/,@A);
-		if(@n>1){
-			for(my $i=2;$i<length($s);$i++){
-				my $cc=substr($s,0,$i);
-				my @nn=grep(/^\Q$cc\E/,@A);
-				if(scalar @nn<scalar @n){last}
-				$c=$cc;$l=$i;
-			}
-			@A=grep(!/^\Q$c\E/,@A);
-			map(s/^\Q$c\E//,@n);
-			$re.="|\Q$c\E".gen_re($quote+1,@n);
-			if(@A){$re.="\n".(" " x $quote)}
-#			print "$l#".join(',',@n)."#$c\n";
-		}else{ #$n=1
-			$re.="|\Q$s\E\n".(' ' x $quote);
-			shift(@A);
-		}
-		if(@A){$atom=0}
-	}
-	if($re eq ""){return "#err#"}
-	if($quote && !$atom){return "(?:".substr($re,1).")"}
-	return substr($re,1);
-}
-
-my $prefix_re = "(?x:".gen_re(0, split(/\n/, $delete_these_prefixes)).")";
+my $prefix_re = ListToRE(split(/\n/, $delete_these_prefixes));
 #die "$prefix_re";
 
 for my $f (@ARGV) {
