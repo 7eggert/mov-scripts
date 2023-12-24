@@ -14,14 +14,13 @@ BEGIN {
 
 	@ISA         = qw(Exporter);
 	@EXPORT      = qw(
-		res_get
-		fn_getheight
-		fn_joindata
-		fn_newbase
-		fn_newname
-		&fn_parse
-	);
-	%EXPORT_TAGS = ( );     # eg: TAG => [ qw!name1 name2! ],
+		new
+q	);
+	%EXPORT_TAGS = qw(
+		WHToRes
+		probe_height
+k		fn_parse
+	);;     # eg: TAG => [ qw!name1 name2! ],
 
 	# your exported package globals go here,
 	# as well as any optionally exported functions
@@ -51,14 +50,14 @@ my $lang1re = qr/[a-z]{2}(?:\+H)?/;
 my $langre = qr/$lang1re(?:,$lang1re)*/;
 my %res_k = ( 4096 => "4k" );
 
-sub res_get($$) {
+sub WHToRes($$) {
 	my ($width, $height) = @_;
 	my $kres = $res_k{$width};
 	return $kres if $kres;
 	return "$height"."p";
 }
 
-sub fn_getheight($%) {
+sub probe_height($%) {
 	my $f = shift;
 	my %flags = (@_);
 
@@ -75,15 +74,13 @@ sub fn_getheight($%) {
 		if    ($mode == 0 && /^\s+Metadata:$/) {
 			$mode++;
 		} elsif ($mode == 1 && /^\s+height\s*:\s*(\d+)/) {
-			#$f->{w}=$1; $f->{h}=$2;
-			#$res=res_get($1, $2);last;
 			$res=$f->{h}=$1;
 		} elsif (/^\s+Stream .0\.\d(?:\([^)]+\))?\: Video\: \w+(?: \([^)]+\))?, (\d+)x(\d+)/) {
 			$f->{w}=$1; $f->{h}=$2;
-			$res=res_get($1, $2);last;
+			$res=WHToRes($1, $2);last;
 		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:(?:\s*\w+(?:\s*\([^)]+\))*,)* (\d+)x(\d+)/) {
 			$f->{w}=$1; $f->{h}=$2;
-			$res=res_get($1, $2);last;
+			$res=WHToRes($1, $2);last;
 		}
 #     Stream #0:0(eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv), 1280x720 [SAR 1:1 DAR 16:9], 3581 kb/s, 25 fps, 25 tbr, 25k tbn, 50 tbc (default)
 	}
@@ -92,8 +89,9 @@ sub fn_getheight($%) {
 	return $f->{res}=[$res] if $res;
 }
 
-sub fn_joindata($) {
+sub joindata($) {
 	my $f = shift;
+	return $f->{data_joined} = '' if $f->{_} && @{$f->{_}};
 	return $f->{data_joined} = join(' ',
 		$f->{year}->[0] || (),
 		$f->{FSK}->[0] || (),
@@ -104,15 +102,15 @@ sub fn_joindata($) {
 	);
 }
 
-sub fn_newbase($) {
+sub newbase($) {
 	my $f = shift;
 	return join(' - ', (@{$f->{name_new}}, $f->{data_joined})) if $f->{data_joined} ne "";
 	return join(' - ', (@{$f->{name_new}}));
 }
 
-sub fn_newname($) {
+sub newname($) {
 	my $f = shift;
-	my $newbase = fn_newbase($f);
+	my $newbase = $f->newbase();
 	return $newbase .".$f->{ext}" if defined $f->{ext};
 	return $newbase;
 }
@@ -164,21 +162,30 @@ sub fn_parse($%) {
 			push(@{$ret->{_}}, $_);
 		}
 	}
-	pop @f if ($shorten_f && !$ret->{"_"});
+	if ($ret->{"_"} && @{$ret->{"_"}}) {
+		delete($ret->{year});
+		delete($ret->{res});
+		delete($ret->{FSK});
+		delete($ret->{st});
+		delete($ret->{lang});
+		delete($ret->{other});
+		delete($ret->{_});
+	} else {
+		pop @f if $shorten_f;
+	}
 	
-	fn_getheight($ret, %flags) if ($flags{vheight});
+	probe_height($ret, %flags) if ($flags{vheight});
 	
-	fn_joindata($ret);
+	joindata($ret);
 	$ret->{name_new} = \@f;
 	
 	return $ret;
 }
 
-=pod
-
-for (@ARGV) {
-	print Data::Dumper->Dump([fn_parse($_, vheight => 1)], [qw(fn_parse)]);
+sub new($%) {
+	my $f = shift;
+	my $ret = fn_parse($f, @_);
+	return bless($ret, "BE::mov::Filename");
 }
-=cut
 
 1;
