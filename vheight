@@ -2,70 +2,32 @@
 use strict;
 use warnings;
 
+use BE::mov::Filename;
+#use Data::Dumper;
+
 use IPC::Open3;
 use Symbol;
-
-sub getheight($) {
-	my ($f) = @_;
-	my ($i, $o, $e, $height);
-	$e = gensym;
-	my $pid = open3($i, $o, $e, "ffprobe", $f);
-	my $mode = 0;
-	while (<$e>) {
-		chomp;
-		if    ($mode == 0 && /^\s+Metadata:$/)
-			{$mode++;}
-		elsif ($mode == 1 && /^\s+height\s*:\s*(\d+)/)
-			{$height=$1;last;}
-		elsif (/^\s+Stream .0\.\d(?:\([^)]+\))?\: Video\: \w+(?: \([^)]+\))?, \d+x(\d+)/)
-			{$height=$1;last;}
-		elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:(?:\s*\w+(?:\s*\([^)]+\))*,)* \d+x(\d+)/)
-			{$height=$1;last;}
-#     Stream #0:0(eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv), 1280x720 [SAR 1:1 DAR 16:9], 3581 kb/s, 25 fps, 25 tbr, 25k tbn, 50 tbc (default)
-	}
-	while (<$e>){};
-	waitpid($pid, 0);
-	return $height;
-}
 
 my $rename;
 for my $f (@ARGV) {
 	if ($f eq "-r") {
 		$rename=1; next;
 	}
-	my ($n, $x, $e);
-	if ($f =~ /(.*) - (.*)(\.[^.]+)/) {
-		($n, $x, $e) = ($1, $2, $3);
-	} elsif ($f =~ /(.*)(\.[^.]+)/) {
-		($n, $x, $e) = ($1, "", $2);
-	}
-	my @x = grep(/./, split(/\s+/, $x));
-	my $doit = 1;
-	for my $s (@x) {
-		if ($s =~ /^\d+p$/) {
-			$doit = 0;
-			print "found »$s«, skipping\n"
-		} elsif ($s !~ /^(?:mit|Hörfassung|DVBT|Fehler|Soundfehler|TV|[a-z]{2}(?:,[a-z]{2})*|\d{4}|]st:.*)/) {
-			$n="$n - $x";
-			$x="";
-			print "- found »$s«, not part of standard qualifiers\n";
-			last;
+	my $fn = BE::mov::Filename::fn_parse($f, vheight => 1);
+	#print Data::Dumper->Dump([$fn], [qw(fn)]);
+	my $g = BE::mov::Filename::fn_newname($fn);
+	my $d = $fn->{dir};
+	print "$g\n";
+	if ($rename && $g ne $f) {
+		rename("$d/$f", "$d/$g");
+		if (-e "$d/$f.sha512") {
+			rename("$d/$f.sha512", "$d/$g.sha512");
 		}
-	}
-	if ($doit) {
-		if ($x ne "") {$x .= " ";}
-		my $height = getheight($f);
-		if (defined $height) {
-			$x .= $height."p";
-		} else {
-			print "- error while getting height for $f\n";
-			next;
+		my $b = BE::mov::Filename::fn_newbase($fn);
+		for my $ext (("txt")) {
+			my $f1 = "$d/$fn->{base_orig}.$ext";
+			next if !-e $f1;
+			rename($f1, "$d/$b.$ext");
 		}
-	}
-	my $f2 = "$n - $x$e";
-	print "$f2\n";
-	if ($rename) {
-		rename($f, $f2);
-		rename($f.".sha512", $f2.".sha512");
 	}
 }
