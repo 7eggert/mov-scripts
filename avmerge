@@ -1,0 +1,150 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+use BE::Dir;
+use BE::Filter;
+use BE::GenRE;
+
+
+sub deleteFromArray_eq(\@$) {
+	my ($a, $needle);
+	for (my $i=0; $i < @$a; $i++) {
+		if ($a->[$i] eq $needle) {
+			splice(@$a, $i, 1);
+			last;
+}	}	}
+
+sub add_prefix_n($@) {
+	my $prefix = shift;
+	return "".join("", map {"$prefix$_\n"} @_);
+}
+
+for my $f (@ARGV) {
+	my ($fb, $fe) = ($f =~ /(.*)\.([^.]+)/);
+	if (!defined $fe) {
+		print STDERR "Can't parse $f\n";
+		next;
+	}
+
+	my $dirname = dirname($f);
+	my $direntries = get_direntries($dirname);
+	$f =~ s,^.*/,,;
+
+	my (@fv, @fa, @fs, @fu, %unlink, %notunlink);
+	my ($rev, $rea, $res, $reu) = (
+		ListToRE(qw(m4v webmv mp4v ts)),
+		ListToRE(qw(m4a aac webma opus webm)),
+		qr,\Q$fb\E(.*)\.srt$,, # Subtitles
+		ListToRE(qw(mp4 webm)),
+	);
+	$rev = qr,^\Q$fb\E(.*)\.$rev$,; # Video
+	$rea = qr,^\Q$fb\E(.*)\.$rea$,; # Audio
+	$reu = qr,^\Q$fb\E(.*)\.$reu$,; # Unknown
+	
+	list_filter_re_arr(@$direntries,
+		$rev => \@fv,
+		$rea => \@fa,
+		$res => \@fs,
+		$reu => \@fu);
+	if (@fu) {
+		if (@fu == 1) {
+			if (@fv) {
+				push(@fa, @fu);
+			} else {
+				push(@fv, @fu);
+			}
+		} else {
+			if (!@fv && !@fa) {
+				for my $u (@fu) {
+					if ($u->[0] =~ /\.mp4/) {
+						push(@fv, $u);
+					} else {
+						push(@fa, $u);
+					}
+				}
+			} elsif (@fv) {
+				push(@fa, @fu);
+			} else {
+				print STDERR "Can't tell if these files are audio or video files:\n",
+					join("\n", @fu),
+					"\n";
+			}
+		}
+	}
+
+	if (!@fv) {
+		print STDERR "did not find adequate video stream file for $f in $dirname\n";
+		next;
+	}
+	print add_prefix_n("Video: ", map {$_->[0]} @fv);
+	if (!@fa) {
+		print STDERR "did not find adequate audio stream file for $f in $dirname\n";
+		next;
+	}
+	print add_prefix_n("Audio: ", map {$_->[0]} @fa);
+	print add_prefix_n("Subtitle: ", map {$_->[0]} @fs);
+	for my $fv (@fv) {
+		my @cmd_fv = ("avconv", "-hide_banner", "-i", $fv->[0]);
+		my @cmd_fa = ();
+		my @cmd_fs = ();
+		my @la = ();
+		my @ls = ();
+		my $b = $fb;
+		my @fb = split(/ - /, $fb);
+		my @files = ($fv->[0]);
+		for my $fa (@fa) {
+			my $extra = $fa->[1];
+			$extra =~ s/^\s+//;
+			$extra =~ s/\s+$//;
+			if ($extra =~ /^[a-z]+$/) {
+				if (@fb) {
+					$fb[@fb-1] =~ s/\b{wb}\Q$extra\E\b{wb}\s?//;
+				}
+				push(@la, $extra);
+			}
+			push (@cmd_fa, "-i", $fa->[0]);
+			push(@files, $fa->[0]);
+		}
+		for my $fs (@fs) {
+			my $extra = $fs->[1];
+			$extra =~ s/^\s+//;
+			$extra =~ s/\s+$//;
+			if ($extra =~ /^[a-z]+$/) {
+				push(@ls, $extra);
+			}
+			push (@cmd_fs, "-i", $fs->[0]);
+			push(@files, $fs->[0]);
+		}
+		if (@fb)
+			{ $b = join(' - ', @fb); };
+		if (@la)
+			{ $b = $b . " " . join(',', @la); }
+		if (@ls)
+			{ $b = $b . " st=" . join(',', @ls); }
+		if (defined $fv->[2] && $fv->[2] ne "")
+			{ $b = "$b $fv->[2]"; }
+		$b =~ s/  / /g;
+		$b =~ s/\s+$//g;
+		my $fv_name = "$b.mkv";
+		if ($fe eq "mkv")
+			{ $fv_name .= ".mkv"; }
+		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, '-c', 'copy', $fv_name);
+		print join(' ', @cmd), "\n";
+
+		if (!system{$cmd[0]}(@cmd)) {
+			for my $f (@files)
+				{ $unlink{$f} = 1; }
+		} else {
+			for my $f (@files)
+				{ $unlink{$f} = $notunlink{$f} = 1; }
+		}
+	}
+	for my $df (keys %unlink) {
+		if ($notunlink{$df}) {
+			print "keeping $df because of transcoding error\n";
+		} else {
+			print "rm $df\n";
+			unlink($df);
+		}
+	}
+}
