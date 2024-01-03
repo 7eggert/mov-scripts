@@ -111,7 +111,7 @@ LINE: while (<>) {
 	s/\r/\n/g;
 	chomp;chomp;
 	
-	if (($mode == 0) && /^Transcript\s*$/) {
+	if (($mode == 0) && /^(?:Transcript|Transkript)\s*$/) {
 		$mode = 1;
 	} elsif ($mode == 1 && /^\s*(\d+):(\d+)\s*$/) {
 		$timeSeen = [0, $1, $2];
