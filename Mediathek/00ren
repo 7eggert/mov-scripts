@@ -123,6 +123,7 @@ for my $f (@ARGV) {
 	my $recode=0; # srt
 	$F =~ s/\xa0/ /g;
 	$F =~ s/^$prefix_re - //i;
+	if(s/-\d{10}(.\w+)$/$1/) { / - / || s/-/ - /};
 	$F =~ s/\.mp4\.(ttml|txt|html|xml)$/.$1/;
 	($F =~ s/\.mp4\.(?:tt|ht|x)ml.srt$/.srt/) && ($recode=1);
 	$F =~ / - / || $F =~ s/\b: / - /;

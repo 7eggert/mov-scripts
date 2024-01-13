@@ -5,6 +5,7 @@ use BE::Dir;
 use BE::Filter;
 use BE::GenRE;
 
+my $noop = 0;
 
 sub deleteFromArray_eq(\@$) {
 	my ($a, $needle);
@@ -20,6 +21,10 @@ sub add_prefix_n($@) {
 }
 
 for my $f (@ARGV) {
+	if ($_ eq "-n") {
+		$noop = 1;
+		next;
+	}
 	my ($fb, $fe) = ($f =~ /(.*)\.([^.]+)/);
 	if (!defined $fe) {
 		print STDERR "Can't parse $f\n";
@@ -131,7 +136,7 @@ for my $f (@ARGV) {
 		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, '-c', 'copy', $fv_name);
 		print join(' ', @cmd), "\n";
 
-		if (!system{$cmd[0]}(@cmd)) {
+		if (!$noop && !system{$cmd[0]}(@cmd)) {
 			for my $f (@files)
 				{ $unlink{$f} = 1; }
 		} else {
@@ -139,12 +144,14 @@ for my $f (@ARGV) {
 				{ $unlink{$f} = $notunlink{$f} = 1; }
 		}
 	}
-	for my $df (keys %unlink) {
-		if ($notunlink{$df}) {
-			print "keeping $df because of transcoding error\n";
-		} else {
-			print "rm $df\n";
-			unlink($df);
+	if (!$noop) {
+		for my $df (keys %unlink) {
+			if ($notunlink{$df}) {
+				print "keeping $df because of transcoding error\n";
+			} else {
+				print "rm $df\n";
+				unlink($df);
+			}
 		}
 	}
 }
