@@ -20,11 +20,14 @@ sub add_prefix_n($@) {
 	return "".join("", map {"$prefix$_\n"} @_);
 }
 
+my $newline = ""; # not print newline before first file
 for my $f (@ARGV) {
 	if ($f eq "-n") {
 		$noop = 1;
 		next;
 	}
+	print $newline;
+	$newline = "\n"; # actually print nnewline on second to last file
 	my ($fb, $fe) = ($f =~ /(.*)\.([^.]+)/);
 	if (!defined $fe) {
 		$fb = $f;
@@ -126,8 +129,8 @@ for my $f (@ARGV) {
 			{ $b = $b . " " . join(',', @la); }
 		if (@ls)
 			{ $b = $b . " st=" . join(',', @ls); }
-		if (defined $fv->[2] && $fv->[2] ne "")
-			{ $b = "$b $fv->[2]"; }
+		if (defined $fv->[1] && $fv->[1] ne "")
+			{ $b = "$b $fv->[1]"; }
 		$b =~ s/  / /g;
 		$b =~ s/\s+$//g;
 		my $fv_name = "$b.mkv";
