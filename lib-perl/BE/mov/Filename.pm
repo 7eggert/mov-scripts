@@ -95,10 +95,10 @@ sub joindata($) {
 	return $f->{data_joined} = '' if $f->{_} && @{$f->{_}};
 	return $f->{data_joined} = join(' ',
 		$f->{year}->[0] || (),
-		$f->{FSK}->[0] || (),
 		$f->{lang}? join(',', @{$f->{lang}}) : (),
 		$f->{st}  ? "st=".join(',', @{$f->{st}}) : (),
 		$f->{other}? @{$f->{other}} : (),
+		$f->{FSK}->[0] || (),
 		$f->{res}->[0] || (),
 	);
 }
