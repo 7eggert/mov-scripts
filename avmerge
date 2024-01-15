@@ -92,9 +92,11 @@ for my $f (@ARGV) {
 	print add_prefix_n("Audio: ", map {$_->[0]} @fa);
 	print add_prefix_n("Subtitle: ", map {$_->[0]} @fs);
 	for my $fv (@fv) {
+		my $fffileidx=0;
 		my @cmd_fv = ("avconv", "-hide_banner", "-i", $fv->[0]);
 		my @cmd_fa = ();
 		my @cmd_fs = ();
+		my @cmd_maps = ('-map', $fffileidx++);
 		my @la = ();
 		my @ls = ();
 		my $b = $fb;
@@ -111,6 +113,7 @@ for my $f (@ARGV) {
 				push(@la, $extra);
 			}
 			push (@cmd_fa, "-i", $fa->[0]);
+			push(@cmd_maps, '-map', $fffileidx++);
 			push(@files, $fa->[0]);
 		}
 		for my $fs (@fs) {
@@ -121,6 +124,7 @@ for my $f (@ARGV) {
 				push(@ls, $extra);
 			}
 			push (@cmd_fs, "-i", $fs->[0]);
+			push(@cmd_maps, '-map', $fffileidx++);
 			push(@files, $fs->[0]);
 		}
 		if (@fb)
@@ -136,7 +140,7 @@ for my $f (@ARGV) {
 		my $fv_name = "$b.mkv";
 		if (defined $fe && $fe eq "mkv")
 			{ $fv_name .= ".mkv"; }
-		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, '-c', 'copy', $fv_name);
+		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, '-c', 'copy', @cmd_maps, $fv_name);
 		print join(' ', @cmd), "\n";
 
 		if (!$noop && !system{$cmd[0]}(@cmd)) {
