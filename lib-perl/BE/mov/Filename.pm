@@ -49,6 +49,7 @@ our @TLTLD;
 my $lang1re = qr/[a-z]{2}(?:\+H)?/;
 my $langre = qr/$lang1re(?:,$lang1re)*/;
 my %res_k = ( 4096 => "4k" );
+my $extrare = qr/^(?:Fehler|Soundfehler|Colorized|Koloriert|DEFA|DVBT||LIVE|TV)$/;
 
 sub WHToRes($$) {
 	my ($width, $height) = @_;
@@ -155,7 +156,7 @@ sub fn_parse($%) {
 		} elsif (/^$langre$/) {
 			push(@{$ret->{lang}}, split(/,/, $_));
 			$shorten_f = 1;
-		} elsif (/^(?:DVBT|Fehler|Soundfehler|DEFA|LIVE|TV)$/) {
+		} elsif (/$extrare/) {
 			push(@{$ret->{other}}, $_);
 			$shorten_f = 1;
 		} else {
