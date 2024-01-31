@@ -87,15 +87,18 @@ sub probe_height($%) {
 		} elsif ($mode == 1 && /^\s+height\s*:\s*(\d+)/) {
 			$res = $f->{h}=$1;
 		} elsif (/^\s+Stream .0\.\d(?:\([^)]+\))?\: Video\: \w+(?: \([^)]+\))?, (\d+)x(\d+)/) {
+			last if /: Video: ansi,/;
 			$f->{w}=$1; $f->{h}=$2;
 			$res = WHToRes($1, $2);
 			last;
 		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:(?:\s*\w+(?:\s*\([^)]+\))*,)* (\d+)x(\d+)/) {
+			last if /: Video: ansi,/;
 			$f->{w}=$1; $f->{h}=$2;
 			$res = WHToRes($1, $2);
 			last;
 		#Stream #0:0: Video: h264 (High), yuv420p(tv, top coded first (swapped)), 704x576 [SAR 16:11 DAR 16:9], 25 fps, 25 tbr, 1k tbn, 50 tbc (default)
 		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:\s+$wordlist_parenteses2_re (\d+)x(\d+)/) {
+			last if /: Video: ansi,/;
 			$f->{w}=$1; $f->{h}=$2;
 			$res = WHToRes($1, $2);
 			last;
