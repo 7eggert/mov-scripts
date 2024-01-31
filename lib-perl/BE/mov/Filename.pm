@@ -58,6 +58,16 @@ sub WHToRes($$) {
 	return "$height"."p";
 }
 
+#We are parsing a Chomsky-2-language with a Chomsky-1-parser so this is ugly
+my $wordlist_re = qr/\w+(?:\s+\w+|,)*/;
+# foo or foo(bar, baz) or (bar, baz)
+my $wordlist_parenteses1_element_re = qr/\w+|\w*\($wordlist_re\)/;
+my $wordlist_parenteses1_re = qr/$wordlist_parenteses1_element_re(?:\s+$wordlist_parenteses1_element_re|,)*/;
+# same but parenteses may appear in parenteses (two levels)
+# foo(bar(baz))
+my $wordlist_parenteses2_element_re = qr/\w+|\w*\($wordlist_parenteses1_re\)/;
+my $wordlist_parenteses2_re = qr/$wordlist_parenteses2_element_re(?:\s+$wordlist_parenteses2_element_re|,)*/;
+
 sub probe_height($%) {
 	my $f = shift;
 	my %flags = (@_);
@@ -75,15 +85,21 @@ sub probe_height($%) {
 		if    ($mode == 0 && /^\s+Metadata:$/) {
 			$mode++;
 		} elsif ($mode == 1 && /^\s+height\s*:\s*(\d+)/) {
-			$res=$f->{h}=$1;
+			$res = $f->{h}=$1;
 		} elsif (/^\s+Stream .0\.\d(?:\([^)]+\))?\: Video\: \w+(?: \([^)]+\))?, (\d+)x(\d+)/) {
 			$f->{w}=$1; $f->{h}=$2;
-			$res=WHToRes($1, $2);last;
+			$res = WHToRes($1, $2);
+			last;
 		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:(?:\s*\w+(?:\s*\([^)]+\))*,)* (\d+)x(\d+)/) {
 			$f->{w}=$1; $f->{h}=$2;
-			$res=WHToRes($1, $2);last;
+			$res = WHToRes($1, $2);
+			last;
+		#Stream #0:0: Video: h264 (High), yuv420p(tv, top coded first (swapped)), 704x576 [SAR 16:11 DAR 16:9], 25 fps, 25 tbr, 1k tbn, 50 tbc (default)
+		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:\s+$wordlist_parenteses2_re (\d+)x(\d+)/) {
+			$f->{w}=$1; $f->{h}=$2;
+			$res = WHToRes($1, $2);
+			last;
 		}
-#     Stream #0:0(eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv), 1280x720 [SAR 1:1 DAR 16:9], 3581 kb/s, 25 fps, 25 tbr, 25k tbn, 50 tbc (default)
 	}
 	while (<$e>){};
 	waitpid($pid, 0);
