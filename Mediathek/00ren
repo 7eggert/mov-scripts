@@ -118,24 +118,32 @@ EOF
 my $prefix_re = ListToRE(split(/\n/, $delete_these_prefixes));
 #die "$prefix_re";
 
+my $noop=0;
 for my $f (@ARGV) {
+	if ($f eq '-n') {
+		$noop = 1;
+		next;
+	}
 	my $F = $f;
 	my $recode=0; # srt
 	$F =~ s/\xa0/ /g;
 	$F =~ s/^$prefix_re - //i;
-	if(s/-\d{10}(.\w+)$/$1/) { / - / || s/-/ - /};
+
+	# things like "42 – Die Antwort Auf Fast Alles-Können Wir Auf Dem Mond Leben?-1344733279 - 1080p.mp4"
+	if($F =~ s/-\d{10}(\.[^.]+)$/$1/) { / - / || s/-/ - /};
+
+	#fix xtensions
 	$F =~ s/\.mp4\.(ttml|txt|html|xml)$/.$1/;
 	($F =~ s/\.mp4\.(?:tt|ht|x)ml.srt$/.srt/) && ($recode=1);
+
 	$F =~ / - / || $F =~ s/\b: / - /;
 	$F =~ s/^./\u$&/; $F =~ s/\s\S/\U$&/g; $F =~s/\bOf\b/of/g;
 	$F =~ s/^(([^-:]+?): ([^-:]+?)) - \1/$2 - $3/;
 	$F =~ s/^(.*?) - \1: /$1 - /;
+
 	$F =~ s/^(.*?) - Faszination Erde Mit Dirk Steffens\b/Faszination Erde - $1/;
-#	if ($F =~ /\((?:Folge )?(\d+)__(\d+)(,[^)]+)?\)/) {
-#		my ($m, $n) = ($1, $2);
-#		my $l = length($n);
-#		$F =~ s/\((?:Folge )?(\d+)__(\d+)(,[^)]+)?\)/sprintf("- %$l.${l}d of %d%s", $m, $n, $3)/e;
-#	}
+	$F =~ s/^Abenteuer Wildnis - (.*?) · ([^-.]+)/$1 - $2/;
+
 	$F =~ s/ - ([^-]*)\s*\((?:Folge )?(\d+)__(\d+)(?:,\s*([^)]+))?\)/my $l=length($2);sprintf(" - %$l.${l}d of %d %s %s", $2, $3, $1, $4?" - ".$4:"")/e
 	|| $F =~ s/\s*\((?:Folge )?(\d+)__(\d+)(?:,\s*([^)]+))?\)( - )/my $l=length($2);sprintf("%s%$l.${l}d of %d %s", $4||" ", $1, $2, $3?"($3)":"")/e;
 	$F =~ s/\s+/ /g;
@@ -143,28 +151,10 @@ for my $f (@ARGV) {
 	if ($F =~ $srt_re) {
 		my $FwS = $F; $FwS =~ s/$srt_re/ - *.m??/;
 		$recode=1;
-		# Filename with Size
-		my @with_size = bsd_glob($FwS, GLOB_NOSORT);
-		while (@with_size > 1) {
-			if (length($with_size[0]) > length($with_size[1])) {
-				shift(@with_size);
-			} else {
-				splice(@with_size,1,1);
-			}
-		}
-		my $with_size = $with_size[0];#bsd_glob($FwS, GLOB_NOSORT);
-		utf8::decode($with_size) if utf8::is_utf8($FwS) && defined $with_size; # bug-workaround?
-		if (defined $with_size) {
-			$F =~ /.[^.]*$/;
-			my $ext = $&;
-			$with_size =~ s/.[^.]*$/$ext/ if defined $ext;
-			$F=$with_size;
-		}
 	}
 	if ($F ne $f) {
 		print("$f -> $F\n");
-		#exit 0;
-		system {"/bin/mv"} ("mv", "-i", $f, $F);
+		system {"/bin/mv"} ("mv", "-i", $f, $F) unless $noop;
 	};
 	#if ($recode) {system {"/usr/bin/recode"} ("recode", "utf8..latin1", $F);}
 	if ($F =~ /\.(mp4|mkv)/i) {system {"/usr/bin/env"} ("env", "vheight", "-r", $F);}
