@@ -4,6 +4,8 @@ use strict;
 use Data::Dumper;
 use IPC::Open3;
 use Symbol;
+use JSON;
+my $JSON = JSON->new->utf8;
 
 BEGIN {
 	use Exporter   ();
@@ -58,55 +60,48 @@ sub WHToRes($$) {
 	return "$height"."p";
 }
 
-#We are parsing a Chomsky-2-language with a Chomsky-1-parser so this is ugly
-my $wordlist_re = qr/\w+(?:\s+\w+|,)*/;
-# foo or foo(bar, baz) or (bar, baz)
-my $wordlist_parenteses1_element_re = qr/\w+|\w*\($wordlist_re\)/;
-my $wordlist_parenteses1_re = qr/$wordlist_parenteses1_element_re(?:\s+$wordlist_parenteses1_element_re|,)*/;
-# same but parenteses may appear in parenteses (two levels)
-# foo(bar(baz))
-my $wordlist_parenteses2_element_re = qr/\w+|\w*\($wordlist_parenteses1_re\)/;
-my $wordlist_parenteses2_re = qr/$wordlist_parenteses2_element_re(?:\s+$wordlist_parenteses2_element_re|,)*/;
-
-sub probe_height($%) {
+sub probe($%) {
 	my $f = shift;
 	my %flags = (@_);
-
-	return if $f->{res} && @{$f->{res}} && !($flags{force});
+	return $f->{json} if !$flags{force} && defined $f->{json};
 
 	my $prog = $flags{progname} || "ffprobe";
 		
 	my ($i, $o, $e, $res);
 	$e = gensym;
-	my $pid = open3($i, $o, $e, $prog, $f->{dir}."/".$f->{name_orig});
-	my $mode = 0;
-	while (<$e>) {
-		chomp;
-		if    ($mode == 0 && /^\s+Metadata:$/) {
-			$mode++;
-		} elsif ($mode == 1 && /^\s+height\s*:\s*(\d+)/) {
-			$res = $f->{h}=$1;
-		} elsif (/^\s+Stream .0\.\d(?:\([^)]+\))?\: Video\: \w+(?: \([^)]+\))?, (\d+)x(\d+)/) {
-			last if /: Video: ansi,/;
-			$f->{w}=$1; $f->{h}=$2;
-			$res = WHToRes($1, $2);
-			last;
-		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:(?:\s*\w+(?:\s*\([^)]+\))*,)* (\d+)x(\d+)/) {
-			last if /: Video: ansi,/;
-			$f->{w}=$1; $f->{h}=$2;
-			$res = WHToRes($1, $2);
-			last;
-		#Stream #0:0: Video: h264 (High), yuv420p(tv, top coded first (swapped)), 704x576 [SAR 16:11 DAR 16:9], 25 fps, 25 tbr, 1k tbn, 50 tbc (default)
-		} elsif (/^\s+Stream .0[.:]\d(?:\([^)]+\))?\: Video\:\s+$wordlist_parenteses2_re (\d+)x(\d+)/) {
-			last if /: Video: ansi,/;
-			$f->{w}=$1; $f->{h}=$2;
-			$res = WHToRes($1, $2);
-			last;
+	my $pid = open3($i, $o, $e,
+		$prog, qw(-hide_banner -show_chapters -show_programs -show_streams
+		-show_format -show_error -print_format json), $f->{dir}."/".$f->{name_orig});
+
+	my $ox;
+	{local $/; $/=undef; $ox = <$o>;}
+	waitpid($pid, 0);
+
+	return $f->{json} = $JSON->decode( $ox );
+}
+
+sub probe_height($%) {
+	my $f = shift;
+	my %flags = (@_);
+
+	my $json = probe($f, %flags);
+	return if !defined $json;
+
+
+	if ($f->{"res"} && @{$f->{"res"}}) {
+		return $f->{"res"} if (!$flags{force})
+	}
+
+	my @res;
+
+	for my $s (@{$json->{streams}}) {
+		if ($s->{codec_type} eq "video") {
+			push @res, WHToRes($f->{w}=$s->{width},
+			                   $f->{h}=$s->{height});
 		}
 	}
-	while (<$e>){};
-	waitpid($pid, 0);
-	return $f->{res}=[$res] if $res;
+
+	return $f->{res}=[@res];
 }
 
 sub joindata($) {
@@ -118,7 +113,7 @@ sub joindata($) {
 		$f->{st}  ? "st=".join(',', @{$f->{st}}) : (),
 		$f->{other}? @{$f->{other}} : (),
 		$f->{FSK}->[0] || (),
-		$f->{res}->[0] || (),
+		$f->{res}? join(',', @{$f->{res}}) : (),
 	);
 }
 
@@ -163,8 +158,8 @@ sub fn_parse($%) {
 		if (/^\d{4}$/) {
 			push(@{$ret->{year}}, $_);
 			$shorten_f = 1;
-		} elsif (/^\d+[ikp]$/) {
-			push(@{$ret->{res}}, $_);
+		} elsif (/^\d+[ikp](?:,\d+[ikp])*$/) { # 1234p, 567i,4k
+			push(@{$ret->{res}}, split(/,/, $_));
 			$shorten_f = 1;
 		} elsif (/^FSK\d+$/) {
 			push(@{$ret->{FSK}}, $_);
