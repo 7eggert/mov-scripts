@@ -24,7 +24,7 @@ for my $f (@ARGV) {
 			rename("$d/$f.sha512", "$d/$g.sha512");
 		}
 		my $b = $fn->newbase();
-		for my $ext (("txt")) {
+		for my $ext (qw(srt ttml)) {
 			my $f1 = "$d/$fn->{base_orig}.$ext";
 			next if !-e $f1;
 			rename($f1, "$d/$b.$ext");
