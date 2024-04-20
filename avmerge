@@ -156,8 +156,8 @@ for my $f (@ARGV) {
 			push(@files, $fs->[0]);
 		}
 		if (@fc) {
-			push (@cmd_fc, "-i", $fc[0][0]);
-			push(@cmd_maps, '-map', $fffileidx++);
+			push (@cmd_fc, "-f", "ffmetadata", "-i", $fc[0][0]);
+			push(@cmd_maps, '-map_metadata', $fffileidx++);
 		}
 		if (@fb)
 			{ $b = join(' - ', @fb); };
