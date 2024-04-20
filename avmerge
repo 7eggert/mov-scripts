@@ -6,6 +6,7 @@ use BE::Filter;
 use BE::GenRE;
 
 my $noop = 0;
+my $keepfiles = 0;
 
 sub deleteFromArray_eq(\@$) {
 	my ($a, $needle);
@@ -24,6 +25,10 @@ my $newline = ""; # not print newline before first file
 for my $f (@ARGV) {
 	if ($f eq "-n") {
 		$noop = 1;
+		next;
+	}
+	if ($f eq "-k") {
+		$keepfiles = 1;
 		next;
 	}
 	print $newline;
@@ -159,7 +164,7 @@ for my $f (@ARGV) {
 					{ $unlink{$f} = $notunlink{$f} = 1; }
 		}
 	}
-	if (!$noop) {
+	if (!$noop && !$keepfiles) {
 		for my $df (keys %unlink) {
 			if ($notunlink{$df}) {
 				print "keeping $df because of transcoding error\n";
