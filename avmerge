@@ -4,9 +4,36 @@ use strict;
 use BE::Dir;
 use BE::Filter;
 use BE::GenRE;
+use Getopt::Long qw(:config bundling);
 
 my $noop = 0;
 my $keepfiles = 0;
+
+sub help()
+{
+	print <<EOF;
+$0 [options] file_prefix [file_prefix] ...
+
+file_prefix: Name of the file to be merged
+             (an extension is automatically removed)
+
+Options:
+  -h --help      This text
+  -k --keepfiles Don't delete the source files even on success
+  -n --noop      Don't execute the merge commands, just print them
+
+Examples:
+  $0 movie_name.m4a -k
+  $0 --noop movie_name
+
+EOF
+}
+
+GetOptions(
+	"h|help" => \&help,
+	"n|noop"  => \$noop,
+	"k|keepfiles" => \$keepfiles,
+);
 
 sub deleteFromArray_eq(\@$) {
 	my ($a, $needle);
@@ -23,14 +50,6 @@ sub add_prefix_n($@) {
 
 my $newline = ""; # not print newline before first file
 for my $f (@ARGV) {
-	if ($f eq "-n") {
-		$noop = 1;
-		next;
-	}
-	if ($f eq "-k") {
-		$keepfiles = 1;
-		next;
-	}
 	print $newline;
 	$newline = "\n"; # actually print nnewline on second to last file
 	my ($fb, $fe) = ($f =~ /(.*)\.([^.]+)/);
