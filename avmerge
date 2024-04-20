@@ -38,12 +38,13 @@ for my $f (@ARGV) {
 	my $direntries = get_direntries($dirname);
 	$f =~ s,^.*/,,;
 
-	my (@fv, @fa, @fs, @fu, %unlink, %notunlink);
-	my ($rev, $rea, $res, $reu) = (
+	my (@fv, @fa, @fs, @fu, @fc, %unlink, %notunlink);
+	my ($rev, $rea, $res, $reu, $rec) = (
 		ListToRE(qw(m4v webmv mp4v ts)),
 		ListToRE(qw(m4a aac webma opus webm)),
 		qr,\Q$fb\E(.*)\.srt$,, # Subtitles
 		ListToRE(qw(mp4 webm)),
+		qr,\Q$fb\E(.*)\.chapters$,, # Subtitles
 	);
 	$rev = qr,^\Q$fb\E(.*)\.$rev$,; # Video
 	$rea = qr,^\Q$fb\E(.*)\.$rea$,; # Audio
@@ -53,7 +54,8 @@ for my $f (@ARGV) {
 		$rev => \@fv,
 		$rea => \@fa,
 		$res => \@fs,
-		$reu => \@fu);
+		$reu => \@fu,
+		$rec => \@fc);
 	if (@fu) {
 		if (@fu == 1) {
 			if (@fv) {
@@ -91,11 +93,13 @@ for my $f (@ARGV) {
 	}
 	print add_prefix_n("Audio: ", map {$_->[0]} @fa);
 	print add_prefix_n("Subtitle: ", map {$_->[0]} @fs);
+	print add_prefix_n("Chapters: ", map {$_->[0]} @fc);
 	for my $fv (@fv) {
 		my $fffileidx=0;
 		my @cmd_fv = ("avconv", "-hide_banner", "-i", $fv->[0]);
 		my @cmd_fa = ();
 		my @cmd_fs = ();
+		my @cmd_fc = ();
 		my @cmd_maps = ('-map', $fffileidx++);
 		my @la = ();
 		my @ls = ();
@@ -127,6 +131,10 @@ for my $f (@ARGV) {
 			push(@cmd_maps, '-map', $fffileidx++);
 			push(@files, $fs->[0]);
 		}
+		if (@fc) {
+			push (@cmd_fc, "-i", $fc[0][0]);
+			push(@cmd_maps, '-map', $fffileidx++);
+		}
 		if (@fb)
 			{ $b = join(' - ', @fb); };
 		if (@la)
@@ -140,7 +148,7 @@ for my $f (@ARGV) {
 		my $fv_name = "$b.mkv";
 		if (defined $fe && $fe eq "mkv")
 			{ $fv_name .= ".mkv"; }
-		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, '-c', 'copy', @cmd_maps, $fv_name);
+		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, @cmd_fc, '-c', 'copy', @cmd_maps, $fv_name);
 		print join(' ', @cmd), "\n";
 
 		if (!$noop && !system{$cmd[0]}(@cmd)) {
