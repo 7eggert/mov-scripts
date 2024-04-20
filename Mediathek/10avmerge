@@ -5,9 +5,9 @@ use warnings;
 #my @Audio = ("mit Audiodeskription", qw(Audiodeskription Englisch Hörfassung Hörfilm Originalversion \(Originalversion\) Französisch \(Französisch\)));
 my @Audios = ( [ "Deutsch mit Audiodeskription", "ger", "+H", [ "Mit Audiodeskription", qw(Audiodeskription Hörfassung Hörfilm) ] ],
                [ "Klare Sprache", "ger", "+K", [ "Klare Sprache" ] ],
-               [ "English", "eng", ",en", [ qw(Englisch Originalversion OV), "Originalversion Mit Untertitel", "OV - English", "englische Fassung" ] ],
+               [ "English", "eng", ",en", [ qw(Englisch Originalversion OV), "Originalversion Mit Untertitel", "OV - English", "englische Fassung", "(Originalversion) (OV)" ] ],
                [ "Danish", "dan", ",dk", [ qw(dan) ] ],
-               [ "Français", "fre", ",fr", [ qw(Französisch) ] ],
+               [ "Français", "fre", ",fr", [ qw(Französisch), "Französische Originalfassung" ] ],
                [ "Norwegian", "nor", ",no", [ qw(nor) ] ],
                [ "Swedish", "swe", ",sv", [ qw(swe) ] ],
 );
@@ -54,31 +54,36 @@ for my $f (@ARGV) {
 		print "found  $AudioRec[0]: $g.$ext\n"
 	}
 	
-	# no "... (Hörfilm) etc. in $f
+	# Jede SRT ist in Deutsch
 	my $srt;
-	for my $srtext (qw(srt vtt ttml)) {
-		$srt = $f;
-		$srt =~ s/(.*)\.([\w\d]+)$/$1.$srtext/;
-		if (!-e $srt) {
-			$srt = $f_orig;
-			$srt =~ s/(.*)\.([\w\d]+)$/$1.$srtext/;
-			#print "looking for $srt\n";
-			if (!-e $srt) {
-				$srt = undef;
-				for my $Audio (@Audiotracks) {
-					# Jede SRT ist in Deutsch
-					my @AudioRec = @$Audio;
-					$srt = $AudioRec[4].".$srtext";
-					print "looking for $srt\n";
-					last if -e $srt;
-					$srt = undef;
-				}
-			}
+	my @possible_srts;
+	my $srtext;
+	{
+		my $s = $basenamestart;
+		push @possible_srts, $basenamestart;
+		if (defined $resolution) {
+			unshift @possible_srts, "$basenamestart - $resolution";
 		}
-		if (defined $srt) {
-			print "found \U$srtext\E $srt\n" if defined $srt;
-			last;
+		for my $Audio (@Audiotracks) {
+			my @AudioRec = @$Audio;
+			push @possible_srts, $AudioRec[4];
+			$s = $AudioRec[4];
+			$s =~ s/ - \d+p$// || $s =~ s/ \d+p$//;
+			push @possible_srts, $s;
 		}
+	}
+	for my $fs (@possible_srts) {
+		print "looking for $fs.???\n";
+		for (qw(srt vtt ttml)) {
+			$srtext = $_;
+			$srt = "$fs.$srtext";
+			if (-e $srt) { goto found_srt }
+		}
+	}
+	$srt = undef;
+	found_srt:
+	if (defined $srt) {
+		print "found \U$srtext\E $srt\n" if defined $srt;
 	}
 	
 	if (!@Audiotracks && !defined $srt) {
@@ -154,6 +159,14 @@ for my $f (@ARGV) {
 			print "mv $extraF → $extraG\n";
 			rename($extraF, $extraG);
 		}
-	}	
+	}
+
+	if (defined $srt) {
+		for my $i (@ins) {
+			next if $i eq "-i";
+			print "rm $i\n";
+			unlink($i);
+		}
+	}
 	
 }
