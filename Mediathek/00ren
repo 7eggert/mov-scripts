@@ -71,6 +71,7 @@ Geschichte - Die Zeit Vor Dem 20. Jahrhundert
 Geschichte - Das 20. Jahrhundert
 Geschichte & Entdeckungen
 Geschichtsdokumentationen
+Hintergrund
 Jugend
 Kabarett
 Kinder & Jugend
@@ -129,7 +130,7 @@ for my $f (@ARGV) {
 	my $F = $f;
 	my $recode=0; # srt
 	$F =~ s/\xa0/ /g;
-	$F =~ s/^$prefix_re - //i;
+	while ($F =~ s/^$prefix_re - //i) {};
 
 	# things like "42 – Die Antwort Auf Fast Alles-Können Wir Auf Dem Mond Leben?-1344733279 - 1080p.mp4"
 	if($F =~ s/-\d{10}(\.[^.]+)$/$1/) { / - / || s/-/ - /};
