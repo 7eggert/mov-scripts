@@ -17,11 +17,11 @@ BEGIN {
 	@ISA         = qw(Exporter);
 	@EXPORT      = qw(
 		new
-q	);
+	);
 	%EXPORT_TAGS = qw(
 		WHToRes
 		probe_height
-k		fn_parse
+		fn_parse
 	);;     # eg: TAG => [ qw!name1 name2! ],
 
 	# your exported package globals go here,
