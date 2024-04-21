@@ -203,6 +203,7 @@ for my $f (@ARGV) {
 		if (@fc) {
 			push (@cmd_fc, "-f", "ffmetadata", "-i", $fc[0][0]);
 			push(@cmd_maps, '-map_metadata', $fffileidx++);
+			push(@files, $fc[0][0]);
 		}
 		if (@fb)
 			{ $b = join(' - ', @fb); };
