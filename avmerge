@@ -7,7 +7,7 @@ use BE::GenRE;
 use Getopt::Long qw(:config bundling);
 
 use BE::mov::Languages qw(%Languages);
-#my %Languages = %BE::mov::Languages::Languages;
+use BE::mov::Filename;
 
 my $noop = 0;
 my $keepfiles = 0;
@@ -94,29 +94,33 @@ for my $f (@ARGV) {
 		$res => \@fs,
 		$reu => \@fu,
 		$rec => \@fc);
-	if (@fu) {
-		if (@fu == 1) {
-			if (@fv) {
-				push(@fa, @fu);
+	for my $fu (@fu) {
+		my $fn = BE::mov::Filename->new($fu->[0]);
+		$fn->probe();
+		die unless $fn->{json};
+#		print Data::Dumper->Dump([$fn->{json}], ["fn->{json}"]);
+		my $have_v = 0;
+		my $have_a = 0;
+		for my $stream (@{$fn->{json}{streams}}) {
+			my $codec_type = $stream->{codec_type};
+			if ($codec_type eq 'video') {
+				$have_v = 1;
+				last if $have_a;
+			} elsif ($codec_type eq 'audio') {
+				$have_a = 1;
+				last if $have_v;
+			} else {die};
+		}
+		if ($have_v) {
+			if ($have_a) {
+				print "Complete video (won't use): $fu->[0]\n";
 			} else {
-				push(@fv, @fu);
+				push(@fv, $fu);
 			}
+		} elsif ($have_a) {
+			push(@fa, $fu);
 		} else {
-			if (!@fv && !@fa) {
-				for my $u (@fu) {
-					if ($u->[0] =~ /\.mp4/) {
-						push(@fv, $u);
-					} else {
-						push(@fa, $u);
-					}
-				}
-			} elsif (@fv) {
-				push(@fa, @fu);
-			} else {
-				print STDERR "Can't tell if these files are audio or video files:\n",
-					join("\n", @fu),
-					"\n";
-			}
+			print "No video / audio stream: fu->[0]\n";
 		}
 	}
 
@@ -134,6 +138,10 @@ for my $f (@ARGV) {
 	print add_prefix_n("Chapters: ", map {$_->[0]} @fc);
 
 	for my $fv (@fv) {
+		my $fn = BE::mov::Filename->new($fb . ($fv->[1] ne ""? "$fv->[1]" : ""));
+		$fn->{lang} = [];
+		$fn->{st} = [];
+		$fn->{ext} = "mkv";
 		my $fffileidx=0;
 		my @cmd_fv = ("avconv", "-hide_banner", "-i", $fv->[0]);
 		my @cmd_fa = ();
@@ -143,8 +151,6 @@ for my $f (@ARGV) {
 		my @cmd_meta = ();
 		my @la = ();
 		my @ls = ();
-		my $b = $fb;
-		my @fb = split(/ - /, $fb);
 		my @files = ($fv->[0]);
 		my $s = "";
 		my $ffaudioidx = 0;
@@ -159,16 +165,24 @@ for my $f (@ARGV) {
 				shift @lang_audio if !$one_lang;
 			};
 			if ($s =~ /^[a-z]{2}$/) {
-				if (@fb) {
-					$fb[@fb-1] =~ s/\b{wb}\Q$s\E\b{wb}\s?//;
-				}
+				push(@{$fn->{lang}}, $s);
 				push(@la, $s);
 				if (defined $Languages{$s}) {
 					push(@cmd_meta, "-metadata:s:a:$ffaudioidx",
 						 "title=$Languages{$s}{name}",
 						"-metadata:s:a:$ffaudioidx",
 						 "language=$Languages{$s}{code3}");
+				} else {
+					goto default_lang;
 				}
+			} elsif ($s =~ /^[a-z]{3}$/) {
+				push(@cmd_meta, "-metadata:s:a:$ffaudioidx",
+					 "title=$s",
+					"-metadata:s:a:$ffaudioidx",
+					 "language=$s");
+			} else {
+				push(@cmd_meta, "-metadata:s:a:$ffaudioidx",
+					"title=$s");
 			}
 			push (@cmd_fa, "-i", $fa->[0]);
 			push(@cmd_maps, '-map', $fffileidx++);
@@ -186,14 +200,26 @@ for my $f (@ARGV) {
 				$s = $lang_st[0];
 				shift @lang_st if !$one_lang;
 			};
-			if ($s =~ /^[a-z]+$/) {
+			if ($s =~ /^[a-z]{2}$/) {
+				push(@{$fn->{st}}, $s);
 				push(@ls, $extra);
 				if (defined $Languages{$s}) {
 					push(@cmd_meta, "-metadata:s:s:$ffstidx",
 						 "title=$Languages{$s}{name}",
 						"-metadata:s:s:$ffstidx",
 						 "language=$Languages{$s}{code3}");
+				} else {
+					goto default_st;
 				}
+			} elsif ($s =~ /^[a-z]{3}$/) {
+				push(@cmd_meta, "-metadata:s:s:$ffstidx",
+					 "title=$s",
+					"-metadata:s:s:$ffstidx",
+					 "language=$s");
+			} else {
+				default_st:
+				push(@cmd_meta, "-metadata:s:s:$ffstidx",
+					 "title=$s");
 			}
 			push (@cmd_fs, "-i", $fs->[0]);
 			push(@cmd_maps, '-map', $fffileidx++);
@@ -205,17 +231,8 @@ for my $f (@ARGV) {
 			push(@cmd_maps, '-map_metadata', $fffileidx++);
 			push(@files, $fc[0][0]);
 		}
-		if (@fb)
-			{ $b = join(' - ', @fb); };
-		if (@la)
-			{ $b = $b . " " . join(',', @la); }
-		if (@ls)
-			{ $b = $b . " st=" . join(',', @ls); }
-		if (defined $fv->[1] && $fv->[1] ne "")
-			{ $b = "$b $fv->[1]"; }
-		$b =~ s/  / /g;
-		$b =~ s/\s+$//g;
-		my $fv_name = "$b.mkv";
+		$fn->joindata();
+		my $fv_name = $fn->newname;
 		if (defined $fe && $fe eq "mkv")
 			{ $fv_name .= ".mkv"; }
 		my @cmd = (@cmd_fv, @cmd_fa, @cmd_fs, @cmd_fc, '-c', 'copy', @cmd_maps, @cmd_meta, $fv_name);
