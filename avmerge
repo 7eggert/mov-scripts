@@ -11,6 +11,7 @@ use BE::mov::Languages qw(%Languages);
 
 my $noop = 0;
 my $keepfiles = 0;
+my $one_lang = 0;
 
 sub help()
 {
@@ -27,6 +28,7 @@ Options:
   -A --lang-audio Set the language for the audio tracks
   -S --lang-st    Set the language for the subtitle tracks
                   (Both are used as needed, be careful)
+  -O --one_lang  Use the same language for all files
 
 Examples:
   $0 movie_name.m4a -k
@@ -44,6 +46,7 @@ GetOptions(
 	"k|keepfiles"    => \$keepfiles,
 	"A|lang-audio=s" => \@lang_audio,
 	"S|lang-st=s"    => \@lang_st,
+	"O|one_lang"     => \$one_lang,
 );
 
 sub deleteFromArray_eq(\@$) {
@@ -151,7 +154,10 @@ for my $f (@ARGV) {
 			$extra =~ s/\s+$//;
 			$extra =~ s/^- //;
 			my $s = $extra;
-			if (@lang_audio) {$s = shift @lang_audio};
+			if (@lang_audio) {
+				$s = $lang_audio[0];
+				shift @lang_audio if !$one_lang;
+			};
 			if ($s =~ /^[a-z]{2}$/) {
 				if (@fb) {
 					$fb[@fb-1] =~ s/\b{wb}\Q$s\E\b{wb}\s?//;
@@ -176,7 +182,10 @@ for my $f (@ARGV) {
 			$extra =~ s/\s+$//;
 			$extra =~ s/^- //;
 			my $s = $extra;
-			if (@lang_st) {$s = shift @lang_st};
+			if (@lang_st) {
+				$s = $lang_st[0];
+				shift @lang_st if !$one_lang;
+			};
 			if ($s =~ /^[a-z]+$/) {
 				push(@ls, $extra);
 				if (defined $Languages{$s}) {
