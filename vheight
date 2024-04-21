@@ -13,7 +13,7 @@ for my $f (@ARGV) {
 	if ($f eq "-r") {
 		$rename=1; next;
 	}
-	my $fn = BE::mov::Filename::new($f, vheight => 1);
+	my $fn = BE::mov::Filename->new($f, vheight => 1);
 	#print Data::Dumper->Dump([$fn], [qw(fn)]);
 	my $g = $fn->newname();
 	my $d = $fn->{dir};

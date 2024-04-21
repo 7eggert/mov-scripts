@@ -15,14 +15,8 @@ BEGIN {
 	$VERSION     = 0.01;
 
 	@ISA         = qw(Exporter);
-	@EXPORT      = qw(
-		new
-	);
-	%EXPORT_TAGS = qw(
-		WHToRes
-		probe_height
-		fn_parse
-	);;     # eg: TAG => [ qw!name1 name2! ],
+	@EXPORT      = ();
+	%EXPORT_TAGS = ();
 
 	# your exported package globals go here,
 	# as well as any optionally exported functions
@@ -34,14 +28,12 @@ our @EXPORT_OK;
 #our %Hashit;
 
 # non-exported package globals go here
-our @TLTLD;
 
 # initialize package globals, first exported ones
 #$Var1   = '';
 #%Hashit = ();
 
 # then the others (which are still accessible as $Some::Module::stuff)
-@TLTLD=();
 
 # file-private lexicals go here
 #my $priv_var    = '';
@@ -109,8 +101,8 @@ sub joindata($) {
 	return $f->{data_joined} = '' if $f->{_} && @{$f->{_}};
 	return $f->{data_joined} = join(' ',
 		$f->{year}->[0] || (),
-		$f->{lang}? join(',', @{$f->{lang}}) : (),
-		$f->{st}  ? "st=".join(',', @{$f->{st}}) : (),
+		$f->{lang} && @{$f->{lang}}? join(',', sort @{$f->{lang}}) : (),
+		$f->{st}  ? "st=".join(',', sort @{$f->{st}}) : (),
 		$f->{other}? @{$f->{other}} : (),
 		$f->{FSK}->[0] || (),
 		$f->{res}? join(',', @{$f->{res}}) : (),
@@ -197,10 +189,11 @@ sub fn_parse($%) {
 	return $ret;
 }
 
-sub new($%) {
+sub new($$%) {
+	my $package = shift;
 	my $f = shift;
 	my $ret = fn_parse($f, @_);
-	return bless($ret, "BE::mov::Filename");
+	return bless($ret, $package);
 }
 
 1;
