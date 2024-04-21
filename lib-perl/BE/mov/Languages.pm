@@ -112,7 +112,7 @@ our %Languages = (
 		#code2p => 
 		fn_heuristic => [qw(swe)],
 	},
-	Es => {
+	es => {
 		name => "Español",
 		code3 => "esp",
 		code2 => "es",
