@@ -1,0 +1,394 @@
+#!/usr/bin/perl -C255
+use utf8;
+use warnings;
+use strict;
+use Data::Dumper;
+
+#use BE::mov::Languages;
+#my %Languages = %BE::mov::Languages::Languages;
+
+#use BE::Dir;
+#use BE::Filter;
+#use BE::GenRE;
+#use Safe;
+#use File::Temp qw( );
+#use Getopt::Long qw(:config bundling);
+
+use JSON;
+my $JSON = JSON->new->utf8;
+
+sub better_codec_1080($$)
+# no vp9 support on many devices
+# 1 = new is better, -1 == old is better, 0 == unknown
+{
+	my ($old, $new) = @_;
+	return 1 if !defined $old;
+	$old =~ s/\..*//;
+	$new =~ s/\..*//;
+	return 0 if $old eq $new;
+	return -1 if $new eq "vp09";
+	return 1 if $new eq "avc1"; #h264
+	return -1 if $old eq "avc1"; #h264
+	return 0;
+}
+
+sub better_codec($$$)
+# 1 = new is better, -1 == old is better, 0 == unknown
+{
+	my ($old, $new, $height) = @_;
+	return better_codec_1080($old, $new) if $height <= 1080;
+	$old =~ s/\..*//;
+	$new =~ s/\..*//;
+	return 0 if $old eq $new;
+	return 1 if $new eq "vp09";
+	return -1 if $old eq "vp09";
+	return 1 if $new eq "avc1"; #h264
+	return -1 if $old eq "avc1"; #h264
+	return 0;
+}
+
+sub json_formats($;$) {
+	my $data = shift;
+	my $do_no_size = shift;
+	my $best_aac;
+	my $best_aac_drc;
+	my $best_opus;
+	my $best_video;
+	my $video_1440p;
+	my $video_1080p;
+	my $best_combined;
+	for my $format (@$data) {
+		my $name = $format->{format_note};
+		next if !defined $name || $name eq 'storyboard';
+		my $format_id = $format->{format_id};
+		my $acodec = $format->{acodec};
+		$acodec = undef if !defined $acodec || $acodec eq 'none';
+		my $vcodec = $format->{vcodec};
+		$vcodec = undef if !defined $vcodec || $vcodec eq 'none';
+		my $br = $format->{vbr} || $format->{tbr};
+		my $size = $format->{filesize};
+		my $h = $format->{height};
+		my $w = $format->{width};
+		if (!defined $acodec) {
+			next if !defined $vcodec;
+			$name = "4k" if $w == 3840;
+			if ($name eq "DASH video") {
+				$name = "$h"."p";
+			}
+			my $v = {
+				h => $h,
+				w => $w,
+				br => $br,
+				name => $name,
+				size => $size,
+				format_id => $format_id,
+				video_ext => $format->{video_ext},
+				vcodec => $vcodec,
+			};
+			
+			#Skip entries without file size on the first run
+			if (!$size && !$do_no_size) {
+				print "no size for $name $vcodec $h×$w\@$br\n";
+				next;
+			}
+			
+			my $better = 1;
+			$better = better_codec($best_video->{vcodec}, $vcodec, $h);
+			if (!defined $best_video || !(1*%$best_video)
+			|| $best_video->{h} < $h
+			||     $best_video->{h} == $h
+			   && ($better > 0
+			   ||    $better == 0
+			      && $best_video->{size} < $size)) {
+				$best_video = $v;
+			}
+			if ($h == 1440 && (
+				   !defined $video_1440p
+				|| $video_1440p->{size} < $size
+			)) {
+				$video_1440p = $v;
+			}
+			if ($h == 1080) {
+				if (!defined $video_1080p) {
+					$video_1080p  = $v;
+				} else {
+					$better = better_codec_1080($video_1080p->{vcodec}, $vcodec);
+				   if ($better > 0
+				   || $better == 0 && $video_1080p->{size} < $size) {
+				   	$video_1080p  = $v;
+				   }
+				}
+			}
+		} else { # now $acodec is set
+			if (!defined $vcodec) {
+				# this is an audio only stream
+				next if !defined $size;
+				my $a = {
+					br => $br,
+					name => $name,
+					size => $size,
+					format_id => $format_id,
+					audio_ext => $format->{audio_ext},
+					acodec => $acodec,
+				};
+				if ($acodec eq "opus") {
+					if (!defined $best_opus
+					|| $best_opus->{size} < $size) {
+						$best_opus = $a;
+					}
+				} elsif ($acodec =~ /^mp4a/) {
+					if ($format_id =~ /-drc$/) {
+						if (!defined $best_aac_drc
+						|| $best_aac_drc->{size} < $size) {
+							$best_aac_drc = $a;
+						}
+					} else {
+						if (!defined $best_aac_drc
+						|| $best_aac_drc->{size} < $size) {
+							$best_aac_drc = $a;
+						}
+					}
+				} else {
+					print "ignoring acodec $acodec\n";
+					print Data::Dumper->Dump([$format], ["format"]);
+				}
+			} else {
+				# now $vcodec and $acodec is set
+				$name = "4k" if $w == 3840;
+				die if !defined $h;
+				my $av = {
+					h => $h,
+					w => $w,
+					br => $br,
+					name => $name,
+					size => $size,
+					format_id => $format_id,
+					video_ext => $format->{video_ext},
+					vcodec => $vcodec,
+					audio_ext => $format->{audio_ext},
+					acodec => $acodec,
+				};
+				my $better = better_codec_1080($best_combined->{vcodec}, $vcodec);
+				if (!defined $best_combined || !(1*%$best_combined)
+				|| $best_combined->{h} < $h
+				|| $better > 0
+				|| $better == 0 && $best_combined->{size} < $size) {
+					$best_combined = $av;
+				}
+			}
+		}
+	}
+	my $auto =[];
+	if ($best_combined) {
+		if (!defined $best_video
+		|| $best_video->{h} <= $best_combined->{h}) {
+			push(@$auto, $best_combined);
+			goto done;
+		}
+	}
+	if (!defined $best_video) {
+		print "no good video found\n";
+		return undef unless wantarray;
+		return ();
+	}
+	# $best_combined is not the best download
+	my $h = $best_video->{h};
+	my ($doaac, $doopus);
+	push(@$auto, $best_video);
+	if ($h > 1080) {
+		$doopus = 1;
+		if ($h > 1440) {
+			if ($video_1440p) {
+				push(@$auto, $video_1440p);
+			} elsif ($video_1080p){
+				push(@$auto, $video_1080p);
+				$doaac = 1;
+			} elsif ($best_combined) {
+				push(@$auto, $best_combined);
+			}
+		}
+	} else { # now $h <= 1080
+		$doaac = 1;
+	}
+	if ($doopus) {
+		if ($best_opus) {
+			push(@$auto, $best_opus)
+		} else {
+			$doaac = 1;
+		}
+	}
+	if ($doaac) {
+		push(@$auto, $best_aac) if $best_aac;
+		push(@$auto, $best_aac_drc) if $best_aac_drc;
+	}
+	done:
+	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined, $auto],
+		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 0;
+	return $auto unless wantarray;
+	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
+}
+
+sub dl_file_cmd($$)
+{
+	my ($file, $url) = @_;
+	return ("wget", "-O", $file, $url);
+}
+
+sub write_captions($$)
+{
+	my ($fprefix, $c) = @_;
+	for my $ext (qw(vtt ttml json3 srv3 srv2 srv1)) {
+		for my $x (@$c) {
+			if ($x->{ext} eq $ext) {
+				return dl_file_cmd("$fprefix.$ext", $x->{url});
+			}
+		}
+	}
+	return ();
+}
+
+sub json_video($)
+{
+	my $data = shift;
+	my $title = $data->{title};
+	$title = $data->{fulltitle} if defined $data->{fulltitle};
+
+	my $cmds = [];
+
+	if (defined (my $channel = $data->{channel})) {
+		$title =~ s/ - / -- /g;
+		$title = "$channel - $title";
+	}
+	$title =~ s/^\.+//;
+	$title =~ s,/,-,g;
+#	print "$title $data->{webpage_url}\n";
+	my $downloads = json_formats($data->{formats});
+	if (!defined $downloads) { $downloads = json_formats($data->{formats}, 1);};
+	for my $d (@$downloads) {
+		my $ext = $d->{video_ext};
+		my $suffix = $d->{vcodec}? " - $d->{name}" : "";
+		$ext = $d->{audio_ext} if !defined $ext;
+		$ext .= "v" unless defined $d->{acodec};
+		$ext .= "a" unless defined $d->{vcodec} || $ext eq "m4a";
+		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, $data->{webpage_url}];
+		push @$cmds, $cmd;
+		
+#		print join(' ', @$cmd), "\n";
+	}
+	if (open(my $fd, '>', "$title.txt")) {
+		print $fd $data->{description};
+		close($fd);
+		print "wrote description to '$title.txt'\n";
+	} else {
+		print STDERR "Can't write description to '$title.txt'\n"
+	}
+	if (defined $data->{chapters} && 1*@{$data->{chapters}}) {
+		if (open(my $fd, '>', "$title.chapters")) {
+			for my $c (@{$data->{chapters}}) {
+				print $fd <<EOF;
+[CHAPTER]
+TIMEBASE=1/1000
+START=$c->{start_time}
+END=$c->{end_time}
+title=$c->{title}
+
+EOF
+			}
+			close($fd);
+			print "wrote chapters to '$title.chapters'\n";
+		} else {
+			print STDERR "Can't write chapters to '$title.chapters'\n"
+		}
+	} else {
+		print "No chapters to write\n";
+	}
+
+	if (defined $data->{subtitles} && 1*%{$data->{subtitles}}) {
+		my $sts = $data->{subtitles};
+		for my $st (keys %{$data->{subtitles}}) {
+			my @cmd = write_captions("$title - $st", $sts->{$st});
+			if (@cmd) {
+				push @$cmds, [@cmd];
+			}
+		}
+	}
+	
+	my $tnurl;
+	if (defined $data->{thumbnail}) {
+		$tnurl = $data->{thumbnail};
+	} elsif (defined $data->{thumbnails} && 1*@{$data->{thumbnails}}) {
+		my $tns = $data->{thumbnails};
+		my $tn = shift @$tns;
+		while (defined (my $t = shift @$tns)) {
+			if ($t->{preference} > $tn->{preference}) {
+				$tn = $t;
+			}
+		}
+		if ($tn) {
+			$tnurl = $tn->{url};
+		}
+	}
+	if (defined $tnurl) {
+		$tnurl =~ /\.[^.]+$/;
+		my $ext = $&;
+		if (!defined $ext) {
+			$ext = ".unknown_picture";
+		}
+		my @cmd = dl_file_cmd("$title$ext", $tnurl);
+		push @$cmds, [@cmd];
+	}
+
+	print "\nPreview:\n";
+	for my $c (@$cmds) {
+		print(join(' ', @$c),"\n");
+	}
+	print "\nRun:\n";
+	for my $c (@$cmds) {
+		print(join(' ', @$c),"\n");
+		system(@$c);
+	}
+
+if(0){	delete $data->{chapters};
+	delete $data->{heatmap};
+	delete $data->{formats};
+	delete $data->{tags};
+	delete $data->{description};
+	delete $data->{requested_downloads};
+	delete $data->{requested_formats};
+	print Data::Dumper->Dump([$data], ["data"]);
+}
+}
+
+sub json_playlist($)
+{
+	my $data = shift;
+	for my $entry (@{$data->{entries}}) {
+		json_video($entry);
+	}
+}
+
+for my $f (@ARGV) {
+	my $vdatafd;
+	if ($f =~ s/^list://) {
+		if (!open($vdatafd, "-|", qw(yt-dlp -J --write-info-json), $f)) {
+			print STDERR "Can't fork while reading video data for $f\n";
+			next;
+		}
+	} else {
+		if (!open($vdatafd, "-|", qw(yt-dlp -J --no-playlist --write-info-json), $f)) {
+			print STDERR "Can't fork while reading video data for $f\n";
+			next;
+		}
+	};
+	my $json = <$vdatafd>;
+	close($vdatafd);
+
+	my $data = $JSON->decode($json);
+	if ($data->{_type} eq "playlist") {
+		json_playlist($data);
+	} elsif ($data->{_type} eq "video") {
+		json_video($data);
+	} else {
+		print STDERR "Got data type $data->{_type}, please program something to deal with that\n";
+	}
+}
