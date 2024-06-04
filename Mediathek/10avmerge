@@ -5,7 +5,7 @@ use warnings;
 #my @Audio = ("mit Audiodeskription", qw(Audiodeskription Englisch Hörfassung Hörfilm Originalversion \(Originalversion\) Französisch \(Französisch\)));
 my @Audios = ( [ "Deutsch mit Audiodeskription", "ger", "+H", [ "Mit Audiodeskription", qw(Audiodeskription Hörfassung Hörfilm) ] ],
                [ "Klare Sprache", "ger", "+K", [ "Klare Sprache" ] ],
-               [ "English", "eng", ",en", [ qw(Englisch Originalversion OV), "Originalversion Mit Untertitel", "OV - English", "englische Fassung", "(Originalversion) (OV)" ] ],
+               [ "English", "eng", ",en", [ qw(Englisch Originalversion OV), "Originalversion Mit Untertitel", "OV - English", "englische Fassung", "Englische Originalfassung", "(Originalversion) (OV)" ] ],
                [ "Danish", "dan", ",dk", [ qw(dan) ] ],
                [ "Français", "fre", ",fr", [ qw(Französisch), "Französische Originalfassung" ] ],
                [ "Norwegian", "nor", ",no", [ qw(nor) ] ],
