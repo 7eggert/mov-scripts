@@ -138,7 +138,7 @@ for my $f (@ARGV) {
 	print add_prefix_n("Chapters: ", map {$_->[0]} @fc);
 
 	for my $fv (@fv) {
-		my $fn = BE::mov::Filename->new($fb . ($fv->[1] ne ""? "$fv->[1]" : ""));
+		my $fn = BE::mov::Filename->new($fb . ($fv->[1] ne ""? "$fv->[1]" : "").".mkv");
 		$fn->{lang} = [];
 		$fn->{st} = [];
 		$fn->{ext} = "mkv";
@@ -154,7 +154,7 @@ for my $f (@ARGV) {
 		my @files = ($fv->[0]);
 		my $s = "";
 		my $ffaudioidx = 0;
-		for my $fa (@fa) {
+		for my $fa (sort {$a->[0] cmp $b->[0]} @fa) {
 			my $extra = $fa->[1];
 			$extra =~ s/^\s+//;
 			$extra =~ s/\s+$//;
@@ -181,8 +181,9 @@ for my $f (@ARGV) {
 					"-metadata:s:a:$ffaudioidx",
 					 "language=$s");
 			} else {
+				default_lang:
 				push(@cmd_meta, "-metadata:s:a:$ffaudioidx",
-					"title=$s");
+					"title=$s") if $s ne "";
 			}
 			push (@cmd_fa, "-i", $fa->[0]);
 			push(@cmd_maps, '-map', $fffileidx++);
@@ -190,7 +191,7 @@ for my $f (@ARGV) {
 			$ffaudioidx++;
 		}
 		my $ffstidx = 0;
-		for my $fs (@fs) {
+		for my $fs (sort {$a->[0] cmp $b->[0]} @fs) {
 			my $extra = $fs->[1];
 			$extra =~ s/^\s+//;
 			$extra =~ s/\s+$//;
@@ -219,7 +220,7 @@ for my $f (@ARGV) {
 			} else {
 				default_st:
 				push(@cmd_meta, "-metadata:s:s:$ffstidx",
-					 "title=$s");
+					 "title=$s") if $s ne "";
 			}
 			push (@cmd_fs, "-i", $fs->[0]);
 			push(@cmd_maps, '-map', $fffileidx++);
