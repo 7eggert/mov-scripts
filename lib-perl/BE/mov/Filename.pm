@@ -102,7 +102,7 @@ sub joindata($) {
 	return $f->{data_joined} = join(' ',
 		$f->{year}->[0] || (),
 		$f->{lang} && @{$f->{lang}}? join(',', sort @{$f->{lang}}) : (),
-		$f->{st}  ? "st=".join(',', sort @{$f->{st}}) : (),
+		$f->{st} && @{$f->{st}}  ? "st=".join(',', sort @{$f->{st}}) : (),
 		$f->{other}? @{$f->{other}} : (),
 		$f->{FSK}->[0] || (),
 		$f->{res}? join(',', @{$f->{res}}) : (),
