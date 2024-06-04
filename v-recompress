@@ -1,0 +1,160 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use BE::Dir;
+use BE::mov::Filename;
+#use Data::Dumper;
+
+use IPC::Open3;
+use Symbol;
+
+my $BITRATE_PER_SQUARE = 1.28606160481770833;
+
+my $PROGRAM = "ffmpeg";
+
+sub touch($) {
+	my $f = shift;
+	my $fh;
+	   utime(undef, undef, $f)
+	|| open($fh, '>>', $f)
+	|| warn "Couldn't touch $f:$!\n";
+}
+
+sub prename($$) {
+	my ($from, $to) = @_;
+	print "\e[1;32mmv '\e[33m$from\e[0;1m' '\e[32m$to\e[0;1m'\e[0m\n";
+	return rename($from, $to);
+}
+
+####################################
+
+my $do_recompress;
+my $highq;
+my $LATIN1;
+my $verbose;
+
+for my $f (@ARGV) {
+	if ($f eq "-e") {
+		$do_recompress=1; next;
+	}
+	if ($f eq "-Q") {
+		$highq=1; next;
+	}
+	if ($f eq "-1") {
+		$LATIN1 = 1; next;
+	}
+	if ($f eq "-v") {
+		$verbose = 1; next;
+	}
+
+	my $dir = BE::Dir::dirname($f);
+	my $dirents = BE::Dir::get_direntries($dir);
+	if (!defined $dirents) {
+		print STDERR "can't get directory entries of $dir\n";
+		next;
+	}
+	my $fbr = "$f.bitrate_ok";
+	if (grep({$_ eq $fbr} @$dirents)) {
+		print "\e[1m$fbr exists, skipping\e[0m\n";
+		next;
+	}
+
+	my $fn = BE::mov::Filename->new($f, vheight => 1);
+	if (!defined $fn || !defined $fn->{json} || !(1*%{$fn->{json}})) {
+		print "\e[1;31mproblem getting data for $f\e[0m\n";
+		next;
+	}
+
+	my $vstream;
+	for my $stream (@{$fn->{json}{streams}}) {
+		if ($stream->{codec_type} eq 'video'){
+			if (defined $vstream) {
+				print "\e[1;31mmore than one video stream, can't handle that yet, in $f\e[0m\n";
+				next;
+			}
+			$vstream = $stream;
+		}
+	}
+	
+	if (!defined $vstream) {
+		print "\e[1mno video stream found in $f, skipping\e[0m\n";
+		next;
+	}
+
+	my $height = $vstream->{height};
+	die if !defined $height;
+	my $width = $vstream->{width};
+	die if !defined  $width;
+	my $area = $height * $width;
+
+#	print Data::Dumper->Dump([$vstream], [qw(vstream)]);
+
+	my $to_codec = $height > 1080? "vp9_vaapi" : "libx264";
+	my $bitrate = $fn->{json}{format}{bit_rate};
+	$bitrate = $vstream->{bit_rate} if defined $vstream->{bit_rate};
+	if (!defined $bitrate) {
+		print "\e[1;31mUNKNOWN bitrate: $f\e[0m\n";
+		next;
+	}
+
+	my $wanted_bitrate;
+	my $new_bitrate = 0;
+	if ($height > 768)
+		{ $wanted_bitrate = int($area * $BITRATE_PER_SQUARE); }
+	elsif ($height > 599)
+		{ $wanted_bitrate = 1500000; }
+	elsif ($height > 380)
+		{ $wanted_bitrate = 1024000; }
+	else { $wanted_bitrate = 768; }
+
+	if ($highq) {
+		$wanted_bitrate = int($wanted_bitrate*1.3)
+	}
+
+	if ($bitrate > 7/4 * $wanted_bitrate)
+		{ $new_bitrate = $wanted_bitrate; }
+
+	my $bitrate_k = int($bitrate/1000)."k";
+	my $new_bitrate_k = int($new_bitrate/1000)."k";
+	if (!$new_bitrate) {
+		print "\e[1mOK keep at  $bitrate_k: $f\e[0m\n";
+		touch($fbr);
+		next;
+	}
+
+	print "\e[1;32m### recompress from $bitrate_k to $new_bitrate_k: $f\e[0m\n";
+	my @latin1;
+	@latin1 = qw(-sub_charenc LATIN1) if $LATIN1;
+	my @cmd = ($PROGRAM, qw(-hide_banner
+		-i), $f,
+		@latin1,
+		qw(-acodec copy -map 0 -map -0:d
+		-vcodec), $to_codec, "-b:v", $new_bitrate, "-maxrate", int($new_bitrate*1.1),
+		qw(-bufsize:v 512k),
+		"$f.mkv");
+
+	if ($verbose) {
+		print join(' ', @cmd),"\n";
+	}
+
+	my $res = system {$cmd[0]} @cmd;
+	if (!$res) {
+		prename("$f", "$f.recompressed");
+		my $ff = "$f.mkv";
+		if ($ff =~ s/\.[\w\d]{1,3}.mkv$/.mkv/
+		&&  ! -e $ff) {
+			prename("$f.mkv", $ff);
+			touch($fbr);
+		}
+	} elsif ($res & 128) {
+		$res = $res & 127;
+		print "\e[1;31mSTOP by signal $res\e[0m\n";
+		exit 1;
+	} else {
+		print "\e[1;31mrecode failed, code $res\e[0m\n";
+	}
+
+	#print Data::Dumper->Dump([$fn], [qw(fn)]);
+}
+
