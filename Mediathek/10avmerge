@@ -10,6 +10,7 @@ my @Audios = ( [ "Deutsch mit Audiodeskription", "ger", "+H", [ "Mit Audiodeskri
                [ "Français", "fre", ",fr", [ qw(Französisch), "Französische Originalfassung" ] ],
                [ "Norwegian", "nor", ",no", [ qw(nor) ] ],
                [ "Swedish", "swe", ",sv", [ qw(swe) ] ],
+               [ "Icelandic", "ice", ",is", [ qw(isl) ] ],
 );
 my @extraext = (qw(txt));
 my @extraextres = (qw(ttml));
