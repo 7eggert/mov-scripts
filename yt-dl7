@@ -3,6 +3,35 @@ use utf8;
 use warnings;
 use strict;
 use Data::Dumper;
+use Getopt::Long qw(:config bundling);
+
+my $do_playlist = 0;
+my $dl_mode = 'v';
+
+sub help()
+{
+	print <<EOF;
+$0 [options] file_prefix [file_prefix] ...
+
+file_prefix: Name of the file to be merged
+             (an extension is automatically removed)
+
+Options:
+  -h --help       This text
+  -L --list       Get the entries from the playlist
+  -A --audio      Audio download mode
+  -V --video      Video download mode (default)
+
+EOF
+}
+
+GetOptions(
+	"h|help"     => \&help,
+	"A|audio" => sub{$dl_mode = 'a';},
+	"V|video" => sub{$dl_mode = 'v';},
+	"L|list"  => \$do_playlist,
+);
+
 
 #use BE::mov::Languages;
 #my %Languages = %BE::mov::Languages::Languages;
@@ -47,7 +76,7 @@ sub better_codec($$$)
 	return 0;
 }
 
-sub json_formats($;$) {
+sub json_formats_v($;$) {
 	my $data = shift;
 	my $do_no_size = shift;
 	my $best_aac;
@@ -228,6 +257,111 @@ sub json_formats($;$) {
 	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
 }
 
+sub json_formats_a($;$) {
+	my $data = shift;
+	my $do_no_size = shift;
+	my $best_aac;
+	my $best_aac_drc;
+	my $best_opus;
+	my $best_video;
+	my $video_1440p;
+	my $video_1080p;
+	my $best_combined;
+	for my $format (@$data) {
+		my $name = $format->{format_note};
+		next if !defined $name || $name eq 'storyboard';
+		my $format_id = $format->{format_id};
+		my $acodec = $format->{acodec};
+		$acodec = undef if !defined $acodec || $acodec eq 'none';
+		my $vcodec = $format->{vcodec};
+		$vcodec = undef if !defined $vcodec || $vcodec eq 'none';
+		my $br = $format->{vbr} || $format->{tbr};
+		my $size = $format->{filesize};
+		my $h = $format->{height};
+		my $w = $format->{width};
+		next if !defined $acodec;
+		# now $acodec is set
+		if (!defined $vcodec) {
+			# this is an audio only stream
+			next if !defined $size;
+			my $a = {
+				br => $br,
+				name => $name,
+				size => $size,
+				format_id => $format_id,
+				audio_ext => $format->{audio_ext},
+				acodec => $acodec,
+			};
+			if ($acodec eq "opus") {
+				if (!defined $best_opus
+				|| $best_opus->{size} < $size) {
+					$best_opus = $a;
+				}
+			} elsif ($acodec =~ /^mp4a/) {
+				if ($format_id =~ /-drc$/) {
+					if (!defined $best_aac_drc
+					|| $best_aac_drc->{size} < $size) {
+						$best_aac_drc = $a;
+					}
+				} else {
+					if (!defined $best_aac_drc
+					|| $best_aac_drc->{size} < $size) {
+						$best_aac_drc = $a;
+					}
+				}
+			} else {
+				print "ignoring acodec $acodec\n";
+				print Data::Dumper->Dump([$format], ["format"]);
+			}
+		} else {
+			# now $vcodec and $acodec is set
+			$name = "4k" if $w == 3840;
+			die if !defined $h;
+			my $av = {
+				h => $h,
+				w => $w,
+				br => $br,
+				name => $name,
+				size => $size,
+				format_id => $format_id,
+				video_ext => $format->{video_ext},
+				vcodec => $vcodec,
+				audio_ext => $format->{audio_ext},
+				acodec => $acodec,
+			};
+			my $better = better_codec_1080($best_combined->{vcodec}, $vcodec);
+			if (!defined $best_combined || !(1*%$best_combined)
+			|| $best_combined->{h} < $h
+			|| $better > 0
+			|| $better == 0 && $best_combined->{size} < $size) {
+				$best_combined = $av;
+			}
+		}
+	}
+	my $auto =[];
+	if ($best_opus) {
+		push(@$auto, $best_opus);
+		goto done;
+	}
+	if ($best_aac) {
+		push(@$auto, $best_aac);
+		goto done;
+	}
+	if ($best_aac_drc) {
+		push(@$auto, $best_aac_drc);
+		goto done;
+	}
+	if ($best_combined) {
+		push(@$auto, $best_combined);
+		goto done;
+	}
+	done:
+	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined, $auto],
+		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 0;
+	return $auto unless wantarray;
+	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
+}
+
 sub dl_file_cmd($$)
 {
 	my ($file, $url) = @_;
@@ -247,7 +381,7 @@ sub write_captions($$)
 	return ();
 }
 
-sub json_video($)
+sub json_doDownload($)
 {
 	my $data = shift;
 	my $title = $data->{title};
@@ -262,8 +396,16 @@ sub json_video($)
 	$title =~ s/^\.+//;
 	$title =~ s,/,-,g;
 #	print "$title $data->{webpage_url}\n";
-	my $downloads = json_formats($data->{formats});
-	if (!defined $downloads) { $downloads = json_formats($data->{formats}, 1);};
+
+	my $downloads;
+	if ($dl_mode eq 'v') {
+		$downloads = json_formats_v($data->{formats});
+		if (!defined $downloads) { $downloads = json_formats_v($data->{formats}, 1);};
+	} else {
+		$downloads = json_formats_a($data->{formats});
+		if (!defined $downloads) { $downloads = json_formats_a($data->{formats}, 1);};
+	}
+
 	for my $d (@$downloads) {
 		my $ext = $d->{video_ext};
 		my $suffix = $d->{vcodec}? " - $d->{name}" : "";
@@ -363,13 +505,14 @@ sub json_playlist($)
 {
 	my $data = shift;
 	for my $entry (@{$data->{entries}}) {
-		json_video($entry);
+		json_doDownload($entry);
 	}
 }
 
+
 for my $f (@ARGV) {
 	my $vdatafd;
-	if ($f =~ s/^list://) {
+	if ($do_playlist) {
 		if (!open($vdatafd, "-|", qw(yt-dlp -J --write-info-json), $f)) {
 			print STDERR "Can't fork while reading video data for $f\n";
 			next;
@@ -387,7 +530,7 @@ for my $f (@ARGV) {
 	if ($data->{_type} eq "playlist") {
 		json_playlist($data);
 	} elsif ($data->{_type} eq "video") {
-		json_video($data);
+		json_doDownload($data);
 	} else {
 		print STDERR "Got data type $data->{_type}, please program something to deal with that\n";
 	}
