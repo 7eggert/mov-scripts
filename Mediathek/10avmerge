@@ -6,11 +6,13 @@ use warnings;
 my @Audios = ( [ "Deutsch mit Audiodeskription", "ger", "+H", [ "Mit Audiodeskription", qw(Audiodeskription Hörfassung Hörfilm) ] ],
                [ "Klare Sprache", "ger", "+K", [ "Klare Sprache" ] ],
                [ "English", "eng", ",en", [ qw(Englisch Originalversion OV), "Originalversion Mit Untertitel", "OV - English", "englische Fassung", "Englische Originalfassung", "(Originalversion) (OV)" ] ],
+               [ "Czech", "cze", ",cs", [ qw(cze) ] ],
                [ "Danish", "dan", ",dk", [ qw(dan) ] ],
                [ "Français", "fre", ",fr", [ qw(Französisch), "Französische Originalfassung" ] ],
+               [ "Icelandic", "ice", ",is", [ qw(isl) ] ],
+               [ "Italian", "ita", ",it", [ qw(ita) ] ],
                [ "Norwegian", "nor", ",no", [ qw(nor) ] ],
                [ "Swedish", "swe", ",sv", [ qw(swe) ] ],
-               [ "Icelandic", "ice", ",is", [ qw(isl) ] ],
 );
 my @extraext = (qw(txt));
 my @extraextres = (qw(ttml));
@@ -29,6 +31,7 @@ for my $f (@ARGV) {
 	for my $Audio (@Audios) {
 		my @AudioRec = @$Audio;
 		my @Audio = @{$AudioRec[3]};
+		unshift(@Audio, $AudioRec[0]);
 
 		my $Audiodeskription;
 		my $g;
