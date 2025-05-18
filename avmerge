@@ -79,7 +79,7 @@ for my $f (@ARGV) {
 	my (@fv, @fa, @fs, @fu, @fc, %unlink, %notunlink);
 	my ($rev, $rea, $res, $reu, $rec) = (
 		ListToRE(qw(m4v webmv mp4v ts)),
-		ListToRE(qw(m4a aac webma opus webm)),
+		ListToRE(qw(m4a mp4a aac webma opus webm)),
 		qr,\Q$fb\E(.*)\.(?:srt|vtt)$,, # Subtitles
 		ListToRE(qw(mp4 webm)),
 		qr,\Q$fb\E(.*)\.chapters$,, # Subtitles
