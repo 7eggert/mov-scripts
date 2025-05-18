@@ -63,7 +63,7 @@ sub probe($%) {
 	$e = gensym;
 	my $pid = open3($i, $o, $e,
 		$prog, qw(-hide_banner -show_chapters -show_programs -show_streams
-		-show_format -show_error -print_format json), $f->{dir}."/".$f->{name_orig});
+		-show_format -show_error -print_format json), $f->{name_orig});
 
 	my $ox;
 	{local $/; $/=undef; $ox = <$o>;}
