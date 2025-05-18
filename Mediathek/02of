@@ -1,6 +1,7 @@
 #!/bin/sh
 pmv  \
-'goto finally if / of/;'\
+'goto finally if / of/ && !/^\d+ of /;'\
+'goto finally if s/(S\d+E\d+) (.*?) (?:–|-) /$2 - $1 /;'\
 's/^Serien - (\d+ of \d+)\s+([^-.]+)( -|\.)/$2 - $1$3/ && return;'\
 'my $done=0;'\
 '{ $done = 1 if s/^(.*) - (?:(.*?) )?\((\d+)__(\d+)\)/'\
