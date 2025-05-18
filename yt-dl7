@@ -6,6 +6,7 @@ use Data::Dumper;
 use Getopt::Long qw(:config bundling);
 
 my $do_playlist = 0;
+my $dummy_run = 0;
 my $dl_mode = 'v';
 
 sub help()
@@ -21,6 +22,7 @@ Options:
   -L --list       Get the entries from the playlist
   -A --audio      Audio download mode
   -V --video      Video download mode (default)
+  -D --dummy		Don't actually execute the commands
 
 EOF
 }
@@ -30,6 +32,7 @@ GetOptions(
 	"A|audio" => sub{$dl_mode = 'a';},
 	"V|video" => sub{$dl_mode = 'v';},
 	"L|list"  => \$do_playlist,
+	"D|dummy" => \$dummy_run,
 );
 
 
@@ -87,21 +90,28 @@ sub json_formats_v($;$) {
 	my $video_1080p;
 	my $best_combined;
 	for my $format (@$data) {
+		#print Data::Dumper->Dump([$format], ["format"]),"\n";# if $format->{format} =~ /233/;
 		my $name = $format->{format_note};
-		next if !defined $name || $name eq 'storyboard';
+		next if defined $name && $name eq 'storyboard';
 		my $format_id = $format->{format_id};
 		my $acodec = $format->{acodec};
 		$acodec = undef if !defined $acodec || $acodec eq 'none';
+		if (!defined $acodec
+		&&  $format->{format} =~ /^\d+ - audio only\b/) {
+			$acodec = $format->{ext}? "$format->{ext}a" : "mp4a";
+		} # just a hack-y guess
+
 		my $vcodec = $format->{vcodec};
 		$vcodec = undef if !defined $vcodec || $vcodec eq 'none';
 		my $br = $format->{vbr} || $format->{tbr};
 		my $size = $format->{filesize};
 		my $h = $format->{height};
 		my $w = $format->{width};
+		#print "here $format->{format}\n";
 		if (!defined $acodec) {
 			next if !defined $vcodec;
 			$name = "4k" if $w == 3840;
-			if ($name eq "DASH video") {
+			if (!defined $name || $name eq "DASH video") {
 				$name = "$h"."p";
 			}
 			my $v = {
@@ -114,6 +124,7 @@ sub json_formats_v($;$) {
 				video_ext => $format->{video_ext},
 				vcodec => $vcodec,
 			};
+			#print Data::Dumper->Dump([$v], ["vcodec"]),"\n";
 			
 			#Skip entries without file size on the first run
 			if (!$size && !$do_no_size) {
@@ -149,9 +160,11 @@ sub json_formats_v($;$) {
 				}
 			}
 		} else { # now $acodec is set
+			#print Data::Dumper->Dump([$format], ["format (acodec)"]),"\n";
 			if (!defined $vcodec) {
 				# this is an audio only stream
-				next if !defined $size;
+				$size = 0 if !defined $size;
+				next if !$size && !$do_no_size;
 				my $a = {
 					br => $br,
 					name => $name,
@@ -162,19 +175,19 @@ sub json_formats_v($;$) {
 				};
 				if ($acodec eq "opus") {
 					if (!defined $best_opus
-					|| $best_opus->{size} < $size) {
+					|| $best_opus->{size} <= $size) {
 						$best_opus = $a;
 					}
 				} elsif ($acodec =~ /^mp4a/) {
 					if ($format_id =~ /-drc$/) {
 						if (!defined $best_aac_drc
-						|| $best_aac_drc->{size} < $size) {
+						|| $best_aac_drc->{size} <= $size) {
 							$best_aac_drc = $a;
 						}
 					} else {
-						if (!defined $best_aac_drc
-						|| $best_aac_drc->{size} < $size) {
-							$best_aac_drc = $a;
+						if (!defined $best_aac
+						|| $best_aac->{size} <= $size) {
+							$best_aac = $a;
 						}
 					}
 				} else {
@@ -216,7 +229,7 @@ sub json_formats_v($;$) {
 		}
 	}
 	if (!defined $best_video) {
-		print "no good video found\n";
+		print "no good video found\n" if $do_no_size; # only print on second run
 		return undef unless wantarray;
 		return ();
 	}
@@ -272,18 +285,26 @@ sub json_formats_a($;$) {
 		next if !defined $name || $name eq 'storyboard';
 		my $format_id = $format->{format_id};
 		my $acodec = $format->{acodec};
-		$acodec = undef if !defined $acodec || $acodec eq 'none';
+		if (!defined $acodec) {
+			if (defined $format->{audio_ext}
+			&& $format->{audio_ext} ne 'none') {
+				$acodec = 'unknown';
+			}
+		} elsif ($acodec eq 'none') {
+			$acodec = undef;
+		}
+		next if !defined $acodec;
 		my $vcodec = $format->{vcodec};
 		$vcodec = undef if !defined $vcodec || $vcodec eq 'none';
 		my $br = $format->{vbr} || $format->{tbr};
 		my $size = $format->{filesize};
 		my $h = $format->{height};
 		my $w = $format->{width};
-		next if !defined $acodec;
 		# now $acodec is set
 		if (!defined $vcodec) {
 			# this is an audio only stream
-			next if !defined $size;
+			$size = 0 if !defined $size;
+			next if !$size && !$do_no_size;
 			my $a = {
 				br => $br,
 				name => $name,
@@ -304,14 +325,21 @@ sub json_formats_a($;$) {
 						$best_aac_drc = $a;
 					}
 				} else {
-					if (!defined $best_aac_drc
-					|| $best_aac_drc->{size} < $size) {
-						$best_aac_drc = $a;
+					if (!defined $best_aac
+					|| $best_aac->{size} < $size) {
+						$best_aac = $a;
 					}
 				}
+			} elsif ($acodec eq "unknown" && $do_no_size) {
+				# we guess aac
+				# also we use the later entries
+				if (!defined $best_aac
+				|| $best_aac->{size} <= $size) {
+					$best_aac = $a;
+				}
 			} else {
-				print "ignoring acodec $acodec\n";
-				print Data::Dumper->Dump([$format], ["format"]);
+				print "ignoring acodec $acodec\n" if !$do_no_size;
+				#print Data::Dumper->Dump([$format], ["format"]);
 			}
 		} else {
 			# now $vcodec and $acodec is set
@@ -400,10 +428,10 @@ sub json_doDownload($)
 	my $downloads;
 	if ($dl_mode eq 'v') {
 		$downloads = json_formats_v($data->{formats});
-		if (!defined $downloads) { $downloads = json_formats_v($data->{formats}, 1);};
+		if (!defined $downloads || !@$downloads) { $downloads = json_formats_v($data->{formats}, 1);};
 	} else {
 		$downloads = json_formats_a($data->{formats});
-		if (!defined $downloads) { $downloads = json_formats_a($data->{formats}, 1);};
+		if (!defined $downloads || !@$downloads) { $downloads = json_formats_a($data->{formats}, 1);};
 	}
 
 	for my $d (@$downloads) {
@@ -476,6 +504,7 @@ EOF
 		if (!defined $ext) {
 			$ext = ".unknown_picture";
 		}
+		$ext =~ s/\?.*//;
 		my @cmd = dl_file_cmd("$title$ext", $tnurl);
 		push @$cmds, [@cmd];
 	}
@@ -484,21 +513,13 @@ EOF
 	for my $c (@$cmds) {
 		print(join(' ', @$c),"\n");
 	}
-	print "\nRun:\n";
-	for my $c (@$cmds) {
-		print(join(' ', @$c),"\n");
-		system(@$c);
-	}
-
-if(0){	delete $data->{chapters};
-	delete $data->{heatmap};
-	delete $data->{formats};
-	delete $data->{tags};
-	delete $data->{description};
-	delete $data->{requested_downloads};
-	delete $data->{requested_formats};
-	print Data::Dumper->Dump([$data], ["data"]);
-}
+	if (!$dummy_run) {
+		print "\nRun:\n";
+		for my $c (@$cmds) {
+			print(join(' ', @$c),"\n");
+			system(@$c);
+		}
+	};
 }
 
 sub json_playlist($)
@@ -527,6 +548,10 @@ for my $f (@ARGV) {
 	close($vdatafd);
 
 	my $data = $JSON->decode($json);
+	if (!$data) {
+		print STDERR "error getting video data\n";
+		next;
+	}
 	if ($data->{_type} eq "playlist") {
 		json_playlist($data);
 	} elsif ($data->{_type} eq "video") {
