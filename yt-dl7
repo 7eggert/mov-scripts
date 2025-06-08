@@ -408,9 +408,11 @@ sub write_captions($$)
 	return ();
 }
 
-sub json_doDownload($)
+sub json_doDownload($;$)
 {
 	my $data = shift;
+	my $json = shift;
+	   $json = $json || $data->{_json};
 	my $title = $data->{title};
 	$title = $data->{fulltitle} if defined $data->{fulltitle};
 
@@ -433,6 +435,13 @@ sub json_doDownload($)
 		if (!defined $downloads || !@$downloads) { $downloads = json_formats_a($data->{formats}, 1);};
 	}
 
+	my $json_fn = "$title.json";
+	if (open(my $fd, '>', $json_fn)) {
+		print $fd $json;
+		close($fd);
+		print "wrote JSON to '$json_fn'\n";
+	} else { $json_fn = undef; }
+	
 	for my $d (@$downloads) {
 		my $ext = $d->{video_ext};
 		my $suffix = $d->{vcodec}? " - $d->{name}" : "";
@@ -440,6 +449,9 @@ sub json_doDownload($)
 		$ext .= "v" unless defined $d->{acodec};
 		$ext .= "a" unless defined $d->{vcodec} || $ext eq "m4a";
 		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, $data->{webpage_url}];
+		if ($json_fn) {
+			$cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, "--load-info-json", $json_fn];
+		}
 		push @$cmds, $cmd;
 		
 #		print join(' ', @$cmd), "\n";
@@ -480,6 +492,10 @@ EOF
 				push @$cmds, [@cmd];
 			}
 		}
+	}
+	if (defined $json_fn) {
+		my $cmd = ["/bin/rm", "-f", $json_fn ];
+		push @$cmds, $cmd;
 	}
 	
 	my $tnurl;
@@ -525,7 +541,7 @@ sub json_playlist($)
 {
 	my $data = shift;
 	for my $entry (@{$data->{entries}}) {
-		json_doDownload($entry);
+		json_doDownload($entry, $data);
 	}
 }
 
@@ -533,7 +549,7 @@ sub json_playlist($)
 for my $f (@ARGV) {
 	my $vdatafd;
 	if ($do_playlist) {
-		if (!open($vdatafd, "-|", qw(yt-dlp -J --write-info-json), $f)) {
+		if (!open($vdatafd, "-|", qw(yt-dlp -J), $f)) {
 			print STDERR "Can't fork while reading video data for $f\n";
 			next;
 		}
@@ -544,9 +560,10 @@ for my $f (@ARGV) {
 		}
 	};
 	my $json = <$vdatafd>;
-	close($vdatafd);
+                              close($vdatafd);
 
 	my $data = $JSON->decode($json);
+	$data->{_json} = $json;
 	if (!$data) {
 		print STDERR "error getting video data\n";
 		next;
