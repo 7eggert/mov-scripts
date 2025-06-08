@@ -276,13 +276,11 @@ sub json_formats_a($;$) {
 	my $best_aac;
 	my $best_aac_drc;
 	my $best_opus;
-	my $best_video;
-	my $video_1440p;
-	my $video_1080p;
+	my $best_unknown_a;
 	my $best_combined;
 	for my $format (@$data) {
 		my $name = $format->{format_note};
-		next if !defined $name || $name eq 'storyboard';
+		next if defined $name && $name eq 'storyboard';
 		my $format_id = $format->{format_id};
 		my $acodec = $format->{acodec};
 		if (!defined $acodec) {
@@ -294,6 +292,7 @@ sub json_formats_a($;$) {
 			$acodec = undef;
 		}
 		next if !defined $acodec;
+		#print "$format_id ac=$acodec ae=$format->{audio_ext} \n";
 		my $vcodec = $format->{vcodec};
 		$vcodec = undef if !defined $vcodec || $vcodec eq 'none';
 		my $br = $format->{vbr} || $format->{tbr};
@@ -384,10 +383,10 @@ sub json_formats_a($;$) {
 		goto done;
 	}
 	done:
-	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined, $auto],
-		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 0;
+	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_unknown_a, $best_combined, $auto],
+		[qw(best_aac best_aac_drc best_opus best_unknown_a best_combined auto)]) if 0;
 	return $auto unless wantarray;
-	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
+	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_unknown_a, $best_combined);
 }
 
 sub dl_file_cmd($$)
