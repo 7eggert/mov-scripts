@@ -95,12 +95,15 @@ sub json_formats_v($;@) {
 	my $video_1440p;
 	my $video_1080p;
 	my $do_no_size = 1;
-	
+
 	for my $format (@$data) {
 		#print Data::Dumper->Dump([$format], ["format"]),"\n";# if $format->{format} =~ /233/;
 		my $name = $format->{format_note};
 
 		next if defined $name && $name eq 'storyboard';
+
+
+		my $language = $format->{language};
 		my $format_id = $format->{format_id};
 		my $acodec = $format->{acodec};
 		$acodec = undef if !defined $acodec || $acodec eq 'none';
@@ -127,19 +130,20 @@ sub json_formats_v($;@) {
 				w => $w,
 				br => $br,
 				name => $name,
+				language => $language,
 				size => $size,
 				format_id => $format_id,
 				video_ext => $format->{video_ext},
 				vcodec => $vcodec,
 			};
 			#print Data::Dumper->Dump([$v], ["vcodec"]),"\n";
-			
+
 			#Skip entries without file size on the first run
 			if (!$size && !$do_no_size) {
 				print "no size for $name $vcodec $h×$w\@$br\n";
 				next;
 			}
-			
+
 			my $better = 1;
 			$better = better_codec($best_video->{vcodec}, $vcodec, $h);
 			if (!defined $best_video || !(1*%$best_video)
@@ -176,6 +180,7 @@ sub json_formats_v($;@) {
 				my $a = {
 					br => $br,
 					name => $name,
+					language => $language,
 					size => $size,
 					format_id => $format_id,
 					audio_ext => $format->{audio_ext},
@@ -284,9 +289,9 @@ sub json_formats_a($;$) {
 	my $best_aac_drc;
 	my $best_opus;
 	my $best_combined;
-	
+
 	#print "Iteration $iteration\n";
-	
+
 	# iterations:
 	# 0: Only opus with known size
 	# 1: Only opus
@@ -294,10 +299,11 @@ sub json_formats_a($;$) {
 	# 3: Any w/o video
 	# 4: Any with known size
 	# 5: Any
-	
+
 	for my $format (@$data) {
 		my $name = $format->{format_note};
 		next if defined $name && $name eq 'storyboard';
+		my $language = $format->{language};
 		my $format_id = $format->{format_id};
 		my $acodec = $format->{acodec};
 		if (!defined $acodec) {
@@ -334,6 +340,7 @@ sub json_formats_a($;$) {
 			my $a = {
 				br => $br,
 				name => $name,
+				language => $language,
 				size => $size,
 				format_id => $format_id,
 				audio_ext => $format->{audio_ext},
@@ -440,7 +447,6 @@ sub json_formats_a($;$) {
 		[qw(best_aac best_aac_drc best_opus best_combined auto)]) if 0;
 	#die;		
 
-
 	return $auto unless wantarray;
 	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_combined);
 }
@@ -454,7 +460,7 @@ sub dl_file_cmd($$)
 sub write_captions($$)
 {
 	my ($fprefix, $c) = @_;
-	for my $ext (qw(vtt ttml json3 srv3 srv2 srv1)) {
+	for my $ext (qw(srt vtt ttml json3 srv3 srv2 srv1)) {
 		for my $x (@$c) {
 			if ($x->{ext} eq $ext) {
 				return dl_file_cmd("$fprefix.$ext", $x->{url});
@@ -468,10 +474,10 @@ sub json_doDownload($)
 {
 	my $data = shift;
 
+	# we might get an empty entry. These will be handled here.
 	return if ! defined $data;
 	return if ! 1*%$data;
-	# we might get an empty entry. These will be handled here.
-	
+
 	# If we have a not-part-of-a-list data object, it will have _json
 	# set to the original text. Otherwise we need to encode the data
 	# to JSON again
@@ -506,10 +512,19 @@ sub json_doDownload($)
 		close($fd);
 		print "wrote JSON to '$json_fn'\n";
 	} else { $json_fn = undef; }
-	
+
 	for my $d (@$downloads) {
 		my $ext = $d->{video_ext};
-		my $suffix = $d->{vcodec}? " - $d->{name}" : "";
+		my $suffix = "";
+		if ($d->{vcodec}) {
+			$suffix = length($d->{name})? " - $d->{name}"
+			        : length($d->{language})? " - $d->{language}"
+			        : "";
+		} elsif ($d->{acodec}) {
+			$suffix = length($d->{language})? " - $d->{language}"
+			        : length($d->{name})? " - $d->{name}"
+			        : "";
+		}
 		$ext = $d->{audio_ext} if !defined $ext;
 		$ext .= "v" unless defined $d->{acodec};
 		$ext .= "a" unless defined $d->{vcodec} || $ext eq "m4a";
@@ -517,12 +532,13 @@ sub json_doDownload($)
 		$ext_audio_arg[0] = '-x' if $dl_mode eq 'a';
 		my @split_chapter_arg ;
 		$split_chapter_arg[0] = '--split-chapters' if $split_chapters;
-		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $data->{webpage_url}];
+		#my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $data->{webpage_url}];
+		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", $data->{webpage_url}];
 		if ($json_fn) {
 			$cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $json_fn];
 		}
 		push @$cmds, $cmd;
-		
+
 #		print join(' ', @$cmd), "\n";
 	}
 	if (open(my $fd, '>', "$title.txt")) {
@@ -555,20 +571,35 @@ EOF
 		print "No chapters to write\n";
 	}
 
+	my %normal_subtitles = ();
+
 	if (defined $data->{subtitles} && 1*%{$data->{subtitles}}) {
 		my $sts = $data->{subtitles};
-		for my $st (keys %{$data->{subtitles}}) {
+		for my $st (keys %$sts) {
+			my @cmd = write_captions("$title - $st", $sts->{$st});
+			if (@cmd) {
+				push @$cmds, [@cmd];
+				$normal_subtitles{$st} = 1;
+			}
+		}
+	}
+
+	if (defined $data->{automatic_captions}) {
+		my $sts = $data->{automatic_captions};
+		for my $st (keys %$sts) {
+			next if $normal_subtitles{$st};
 			my @cmd = write_captions("$title - $st", $sts->{$st});
 			if (@cmd) {
 				push @$cmds, [@cmd];
 			}
 		}
 	}
+
 	if (defined $json_fn) {
 		my $cmd = ["/bin/rm", "-f", $json_fn ];
 		push @$cmds, $cmd;
 	}
-	
+
 	my $tnurl;
 	if (defined $data->{thumbnail}) {
 		$tnurl = $data->{thumbnail};
