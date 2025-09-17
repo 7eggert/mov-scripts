@@ -6,6 +6,7 @@ use Data::Dumper;
 use Getopt::Long qw(:config bundling);
 
 my $do_playlist = 0;
+my $split_chapters = 0;
 my $dummy_run = 0;
 my $dl_mode = 'v';
 
@@ -22,6 +23,8 @@ Options:
   -L --list       Get the entries from the playlist
   -A --audio      Audio download mode
   -V --video      Video download mode (default)
+  -C --split-chapters
+                  Split by chapters
   -D --dummy		Don't actually execute the commands
 
 EOF
@@ -31,6 +34,8 @@ GetOptions(
 	"h|help"     => \&help,
 	"A|audio" => sub{$dl_mode = 'a';},
 	"V|video" => sub{$dl_mode = 'v';},
+	"C|split-chapters"
+	          => \$split_chapters,
 	"L|list"  => \$do_playlist,
 	"D|dummy" => \$dummy_run,
 );
@@ -79,19 +84,22 @@ sub better_codec($$$)
 	return 0;
 }
 
-sub json_formats_v($;$) {
-	my $data = shift;
-	my $do_no_size = shift;
-	my $best_aac;
-	my $best_aac_drc;
-	my $best_opus;
+sub json_formats_a($;$);
+sub json_formats_v($;@);
+
+sub json_formats_v($;@) {
+	my ($data, $iteration, $auto, $best_aac, $best_aac_drc, $best_opus, $best_combined) = @_;
+	$iteration = $iteration || 0;
+	$auto = [];
 	my $best_video;
 	my $video_1440p;
 	my $video_1080p;
-	my $best_combined;
+	my $do_no_size = 1;
+	
 	for my $format (@$data) {
 		#print Data::Dumper->Dump([$format], ["format"]),"\n";# if $format->{format} =~ /233/;
 		my $name = $format->{format_note};
+
 		next if defined $name && $name eq 'storyboard';
 		my $format_id = $format->{format_id};
 		my $acodec = $format->{acodec};
@@ -111,7 +119,7 @@ sub json_formats_v($;$) {
 		if (!defined $acodec) {
 			next if !defined $vcodec;
 			$name = "4k" if $w == 3840;
-			if (!defined $name || $name eq "DASH video") {
+			if (!defined $name || $name eq "DASH video" || $name eq "IOS") {
 				$name = "$h"."p";
 			}
 			my $v = {
@@ -220,7 +228,6 @@ sub json_formats_v($;$) {
 			}
 		}
 	}
-	my $auto =[];
 	if ($best_combined) {
 		if (!defined $best_video
 		|| $best_video->{h} <= $best_combined->{h}) {
@@ -272,12 +279,22 @@ sub json_formats_v($;$) {
 
 sub json_formats_a($;$) {
 	my $data = shift;
-	my $do_no_size = shift;
+	my $iteration = shift || 0;
 	my $best_aac;
 	my $best_aac_drc;
 	my $best_opus;
-	my $best_unknown_a;
 	my $best_combined;
+	
+	#print "Iteration $iteration\n";
+	
+	# iterations:
+	# 0: Only opus with known size
+	# 1: Only opus
+	# 2: Any w/o video with known size
+	# 3: Any w/o video
+	# 4: Any with known size
+	# 5: Any
+	
 	for my $format (@$data) {
 		my $name = $format->{format_note};
 		next if defined $name && $name eq 'storyboard';
@@ -292,18 +309,28 @@ sub json_formats_a($;$) {
 			$acodec = undef;
 		}
 		next if !defined $acodec;
-		#print "$format_id ac=$acodec ae=$format->{audio_ext} \n";
 		my $vcodec = $format->{vcodec};
 		$vcodec = undef if !defined $vcodec || $vcodec eq 'none';
 		my $br = $format->{vbr} || $format->{tbr};
 		my $size = $format->{filesize};
+		$size = 0 if !defined $size;
+		my $sp = $format->{source_preference} || 0;
 		my $h = $format->{height};
 		my $w = $format->{width};
+
+		my $pvcodec = $vcodec || "()";
+		my $psize = defined $size? $size : -1;
+
+		#print "###\n$format_id ac=$acodec ae=$format->{audio_ext} vc=$pvcodec $psize\n###\n";
+		#print Data::Dumper->Dump([$format]);
+
 		# now $acodec is set
 		if (!defined $vcodec) {
 			# this is an audio only stream
-			$size = 0 if !defined $size;
-			next if !$size && !$do_no_size;
+
+			next if !$size && ! ($iteration & 1);
+			# look for size on iterations 0,2,4
+
 			my $a = {
 				br => $br,
 				name => $name,
@@ -311,37 +338,58 @@ sub json_formats_a($;$) {
 				format_id => $format_id,
 				audio_ext => $format->{audio_ext},
 				acodec => $acodec,
+				source_preference => $sp,
 			};
 			if ($acodec eq "opus") {
 				if (!defined $best_opus
-				|| $best_opus->{size} < $size) {
+				|| !(1*%$best_opus)
+				|| (!$best_opus->{size}
+				    && $best_opus->{source_preference} <= $sp)
+				|| $best_opus->{size} < $size
+				) {
 					$best_opus = $a;
 				}
+			} elsif ($iteration < 2) {
+				next;
 			} elsif ($acodec =~ /^mp4a/) {
 				if ($format_id =~ /-drc$/) {
 					if (!defined $best_aac_drc
+					|| !(1*%$best_aac_drc)
+					|| (!$best_aac_drc->{size}
+					    && $best_aac_drc->{source_preference} <= $sp)
 					|| $best_aac_drc->{size} < $size) {
 						$best_aac_drc = $a;
 					}
 				} else {
 					if (!defined $best_aac
+					|| !(1*%$best_aac)
+					|| (!$best_aac->{size}
+					    && $best_aac->{source_preference} <= $sp)
 					|| $best_aac->{size} < $size) {
 						$best_aac = $a;
 					}
 				}
-			} elsif ($acodec eq "unknown" && $do_no_size) {
+			} elsif ($acodec eq "unknown" && $iteration >1) {
 				# we guess aac
-				# also we use the later entries
 				if (!defined $best_aac
-				|| $best_aac->{size} <= $size) {
+				|| !(1*%$best_aac)
+				|| (!$best_aac->{size}
+					 && $best_aac->{source_preference} <= $sp)
+				|| $best_aac->{size} < $size) {
 					$best_aac = $a;
 				}
 			} else {
-				print "ignoring acodec $acodec\n" if !$do_no_size;
 				#print Data::Dumper->Dump([$format], ["format"]);
+				#print("################################################################\n");
 			}
 		} else {
+			next if $iteration < 4;
+			# no video download if there are audio downloads
+			next if !$size && ! ($iteration & 1);
+			# look for size on iterations 0,2,4
+
 			# now $vcodec and $acodec is set
+
 			$name = "4k" if $w == 3840;
 			die if !defined $h;
 			my $av = {
@@ -383,10 +431,18 @@ sub json_formats_a($;$) {
 		goto done;
 	}
 	done:
-	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_unknown_a, $best_combined, $auto],
-		[qw(best_aac best_aac_drc best_opus best_unknown_a best_combined auto)]) if 0;
+
+	return json_formats_a($data, $iteration + 1) if !(1*@$auto) && ($iteration < 6);
+	# next iteration if we found nothing
+
+
+	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_combined, $auto],
+		[qw(best_aac best_aac_drc best_opus best_combined auto)]) if 0;
+	#die;		
+
+
 	return $auto unless wantarray;
-	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_unknown_a, $best_combined);
+	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_combined);
 }
 
 sub dl_file_cmd($$)
@@ -408,11 +464,21 @@ sub write_captions($$)
 	return ();
 }
 
-sub json_doDownload($;$)
+sub json_doDownload($)
 {
 	my $data = shift;
-	my $json = shift;
-	   $json = $json || $data->{_json};
+
+	return if ! defined $data;
+	return if ! 1*%$data;
+	# we might get an empty entry. These will be handled here.
+	
+	# If we have a not-part-of-a-list data object, it will have _json
+	# set to the original text. Otherwise we need to encode the data
+	# to JSON again
+	my $json = $data->{_json};
+	if (!defined $json) {
+		$json = $JSON->encode($data);
+	}
 	my $title = $data->{title};
 	$title = $data->{fulltitle} if defined $data->{fulltitle};
 
@@ -424,7 +490,7 @@ sub json_doDownload($;$)
 	}
 	$title =~ s/^\.+//;
 	$title =~ s,/,-,g;
-#	print "$title $data->{webpage_url}\n";
+	print "$title $data->{webpage_url}\n";
 
 	my $downloads;
 	if ($dl_mode eq 'v') {
@@ -432,7 +498,6 @@ sub json_doDownload($;$)
 		if (!defined $downloads || !@$downloads) { $downloads = json_formats_v($data->{formats}, 1);};
 	} else {
 		$downloads = json_formats_a($data->{formats});
-		if (!defined $downloads || !@$downloads) { $downloads = json_formats_a($data->{formats}, 1);};
 	}
 
 	my $json_fn = "$title.json";
@@ -448,9 +513,13 @@ sub json_doDownload($;$)
 		$ext = $d->{audio_ext} if !defined $ext;
 		$ext .= "v" unless defined $d->{acodec};
 		$ext .= "a" unless defined $d->{vcodec} || $ext eq "m4a";
-		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, $data->{webpage_url}];
+		my @ext_audio_arg;
+		$ext_audio_arg[0] = '-x' if $dl_mode eq 'a';
+		my @split_chapter_arg ;
+		$split_chapter_arg[0] = '--split-chapters' if $split_chapters;
+		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $data->{webpage_url}];
 		if ($json_fn) {
-			$cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, "--load-info-json", $json_fn];
+			$cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $json_fn];
 		}
 		push @$cmds, $cmd;
 		
@@ -541,26 +610,33 @@ sub json_playlist($)
 {
 	my $data = shift;
 	for my $entry (@{$data->{entries}}) {
-		json_doDownload($entry, $data);
+		json_doDownload($entry);
 	}
 }
 
 
 for my $f (@ARGV) {
 	my $vdatafd;
-	if ($do_playlist) {
-		if (!open($vdatafd, "-|", qw(yt-dlp -J), $f)) {
+	if ($f =~ /^json:(.*)/) {
+		if (!open($vdatafd, "<", $1)) {
+			print STDERR "Can't open $f for reading: $!\n";
+			next;
+		}
+	} elsif ($do_playlist) {
+		if (!open($vdatafd, "-|", qw(yt-dlp -J --verbose --quiet -t sleep), $f)) {
+			# --verbose --quiet makes yt-dlp output the messages to stderr
 			print STDERR "Can't fork while reading video data for $f\n";
 			next;
 		}
 	} else {
-		if (!open($vdatafd, "-|", qw(yt-dlp -J --no-playlist --write-info-json), $f)) {
+		if (!open($vdatafd, "-|", qw(yt-dlp -J --no-playlist --verbose --quiet -t sleep), $f)) {
+			# --verbose --quiet makes yt-dlp output the messages to stderr
 			print STDERR "Can't fork while reading video data for $f\n";
 			next;
 		}
 	};
 	my $json = <$vdatafd>;
-                              close($vdatafd);
+	close($vdatafd);
 
 	my $data = $JSON->decode($json);
 	$data->{_json} = $json;
