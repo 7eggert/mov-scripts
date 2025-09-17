@@ -526,6 +526,8 @@ sub json_doDownload($)
 #		print join(' ', @$cmd), "\n";
 	}
 	if (open(my $fd, '>', "$title.txt")) {
+		print $fd "Title: $title\n".
+			"URL: $data->{webpage_url}\n\n";
 		print $fd $data->{description};
 		close($fd);
 		print "wrote description to '$title.txt'\n";
