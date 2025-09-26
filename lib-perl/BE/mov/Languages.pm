@@ -105,6 +105,13 @@ our %Languages = (
 		#code2p => 
 		fn_heuristic => [qw(nor)],
 	},
+	pt => {
+		name => "Português",
+		code3 => "por",
+		code2 => "po",
+		#code2p =>
+		fn_heuristic => [qw(po por)],
+	},
 	sv => {
 		name => "Swedish",
 		code3 => "swe",
