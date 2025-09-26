@@ -40,7 +40,7 @@ our @EXPORT_OK;
 #my %secret_hash = ();
 
 
-my $lang1re = qr/[a-z]{2}(?:\+H)?/;
+my $lang1re = qr/[a-z]{2}(?:\+H)?|many/;
 my $langre = qr/$lang1re(?:,$lang1re)*/;
 my %res_k = ( 4096 => "4k" );
 my $extrare = qr/^(?:Fehler|Soundfehler|Colorized|Koloriert|DEFA|DVBT||LIVE|TV)$/;
@@ -99,10 +99,16 @@ sub probe_height($%) {
 sub joindata($) {
 	my $f = shift;
 	return $f->{data_joined} = '' if $f->{_} && @{$f->{_}};
+	sub st_names($) {
+		my $f = shift;
+		return () if !defined $f->{st} || !(@{$f->{st}});
+		return "st=many" if 1*@{$f->{st}} > 10 || grep /^many$/, @{$f->{st}};
+		return "st=".join(',', sort @{$f->{st}});
+	}
 	return $f->{data_joined} = join(' ',
 		$f->{year}->[0] || (),
 		$f->{lang} && @{$f->{lang}}? join(',', sort @{$f->{lang}}) : (),
-		$f->{st} && @{$f->{st}}  ? "st=".join(',', sort @{$f->{st}}) : (),
+		st_names($f),
 		$f->{other}? @{$f->{other}} : (),
 		$f->{FSK}->[0] || (),
 		$f->{res}? join(',', @{$f->{res}}) : (),
