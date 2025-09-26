@@ -9,6 +9,7 @@ my $do_playlist = 0;
 my $split_chapters = 0;
 my $dummy_run = 0;
 my $dl_mode = 'v';
+my $subtitles_lvl = 1;
 
 sub help()
 {
@@ -25,6 +26,10 @@ Options:
   -V --video      Video download mode (default)
   -C --split-chapters
                   Split by chapters
+  -s --subtitles <n>
+                  n=0: No subtitles
+                  n=1: Normal subtitles only (default)
+                  n=2: sutomatic subtitles, too
   -D --dummy		Don't actually execute the commands
 
 EOF
@@ -36,6 +41,8 @@ GetOptions(
 	"V|video" => sub{$dl_mode = 'v';},
 	"C|split-chapters"
 	          => \$split_chapters,
+	"s|subtitles=i"
+	          => \$subtitles_lvl,
 	"L|list"  => \$do_playlist,
 	"D|dummy" => \$dummy_run,
 );
@@ -53,6 +60,14 @@ GetOptions(
 
 use JSON;
 my $JSON = JSON->new->utf8;
+
+sub  quoteShell(@)
+{
+	my @ret;
+	map { (my $x = $_) =~ s/\'/\'\\\'\'/; push @ret, "'$x'"; } @_;
+	return @ret if wantarray;
+	return $ret[0];
+}
 
 sub better_codec_1080($$)
 # no vp9 support on many devices
@@ -174,7 +189,9 @@ sub json_formats_v($;@) {
 		} else { # now $acodec is set
 			#print Data::Dumper->Dump([$format], ["format (acodec)"]),"\n";
 			if (!defined $vcodec) {
+				next;
 				# this is an audio only stream
+				# The following is redundant now, will be removed
 				$size = 0 if !defined $size;
 				next if !$size && !$do_no_size;
 				my $a = {
@@ -282,6 +299,26 @@ sub json_formats_v($;@) {
 	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
 }
 
+sub better_acodec($$);
+sub better_acodec($$) {
+	my ($old, $new) = @_;
+	return $new if !defined $old || !defined $old->{format_id};
+
+	$old->{format_id} =~ /(\d+)/;
+	my $oid = $1;
+	$new->{format_id} =~ /(\d+)/;
+	my $nid = $1;
+	return $old if $oid > $nid;
+	return $new if $nid > $oid;
+
+	# now both are equal
+	if (!defined $old->{languages}) {
+		$old->{languages}{$old->{language}} = $old;
+	}
+	$old->{languages}{$new->{language}} = $new;
+	return $old;
+}
+
 sub json_formats_a($;$) {
 	my $data = shift;
 	my $iteration = shift || 0;
@@ -348,43 +385,17 @@ sub json_formats_a($;$) {
 				source_preference => $sp,
 			};
 			if ($acodec eq "opus") {
-				if (!defined $best_opus
-				|| !(1*%$best_opus)
-				|| (!$best_opus->{size}
-				    && $best_opus->{source_preference} <= $sp)
-				|| $best_opus->{size} < $size
-				) {
-					$best_opus = $a;
-				}
+				$best_opus = better_acodec($best_opus, $a);
 			} elsif ($iteration < 2) {
 				next;
 			} elsif ($acodec =~ /^mp4a/) {
 				if ($format_id =~ /-drc$/) {
-					if (!defined $best_aac_drc
-					|| !(1*%$best_aac_drc)
-					|| (!$best_aac_drc->{size}
-					    && $best_aac_drc->{source_preference} <= $sp)
-					|| $best_aac_drc->{size} < $size) {
-						$best_aac_drc = $a;
-					}
+					$best_aac_drc = better_acodec($best_aac_drc, $a);
 				} else {
-					if (!defined $best_aac
-					|| !(1*%$best_aac)
-					|| (!$best_aac->{size}
-					    && $best_aac->{source_preference} <= $sp)
-					|| $best_aac->{size} < $size) {
-						$best_aac = $a;
-					}
+					$best_aac = better_acodec($best_aac, $a);
 				}
 			} elsif ($acodec eq "unknown" && $iteration >1) {
-				# we guess aac
-				if (!defined $best_aac
-				|| !(1*%$best_aac)
-				|| (!$best_aac->{size}
-					 && $best_aac->{source_preference} <= $sp)
-				|| $best_aac->{size} < $size) {
-					$best_aac = $a;
-				}
+				$best_aac = better_acodec($best_aac, $a);
 			} else {
 				#print Data::Dumper->Dump([$format], ["format"]);
 				#print("################################################################\n");
@@ -445,7 +456,7 @@ sub json_formats_a($;$) {
 
 	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_combined, $auto],
 		[qw(best_aac best_aac_drc best_opus best_combined auto)]) if 0;
-	#die;		
+	#die;
 
 	return $auto unless wantarray;
 	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_combined);
@@ -454,7 +465,7 @@ sub json_formats_a($;$) {
 sub dl_file_cmd($$)
 {
 	my ($file, $url) = @_;
-	return ("wget", "-O", $file, $url);
+	return ($file => ["wget", "-O", $file, $url]);
 }
 
 sub write_captions($$)
@@ -468,6 +479,43 @@ sub write_captions($$)
 		}
 	}
 	return ();
+}
+
+sub download_cmds($$) {
+	my %cmds = ();
+	my ($d, $v) = @_;
+	if (defined $d->{languages}) {
+		my $languages = delete($d->{languages});
+		for my $k (keys %$languages) {
+			my %t = download_cmds($languages->{$k}, $v);
+			@cmds{keys %t} = values %t;
+		}
+		return %cmds;
+	}
+	my $ext = $d->{video_ext};
+	my $suffix = "";
+	if ($d->{vcodec}) {
+		$suffix = length($d->{name})? " - $d->{name}"
+				  : length($d->{language})? " - $d->{language}"
+				  : "";
+	} elsif ($d->{acodec}) {
+		$suffix = length($d->{language})? " - $d->{language}"
+				  : length($d->{name})? " - $d->{name}"
+				  : "";
+	}
+	$ext = $d->{audio_ext} if !defined $ext;
+	$ext .= "v" unless defined $d->{acodec};
+	$ext .= "a" unless defined $d->{vcodec} || $ext eq "m4a";
+	my @ext_audio_arg;
+	$ext_audio_arg[0] = '-x' if $dl_mode eq 'a';
+	my @split_chapter_arg ;
+	$split_chapter_arg[0] = '--split-chapters' if $split_chapters;
+	my $cmd = ["yt-dlp", "--output", "$v->{title}$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", $v->{data}->{webpage_url}];
+	if ($v->{json_fn}) {
+		$cmd = ["yt-dlp", "--output", "$v->{title}$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $v->{json_fn}];
+	}
+	$cmds{"$v->{title}$suffix.$ext"} = $cmd;
+	return %cmds;
 }
 
 sub json_doDownload($)
@@ -488,7 +536,8 @@ sub json_doDownload($)
 	my $title = $data->{title};
 	$title = $data->{fulltitle} if defined $data->{fulltitle};
 
-	my $cmds = [];
+	my $cmds = {};
+	my $cmds2 = [];
 
 	if (defined (my $channel = $data->{channel})) {
 		$title =~ s/ - / -- /g;
@@ -498,12 +547,11 @@ sub json_doDownload($)
 	$title =~ s,/,-,g;
 	print "$title $data->{webpage_url}\n";
 
-	my $downloads;
+	my @downloads = json_formats_a($data->{formats});
+	my $downloads = $downloads[0];
 	if ($dl_mode eq 'v') {
-		$downloads = json_formats_v($data->{formats});
-		if (!defined $downloads || !@$downloads) { $downloads = json_formats_v($data->{formats}, 1);};
-	} else {
-		$downloads = json_formats_a($data->{formats});
+		$downloads = json_formats_v($data->{formats}, 0, @downloads);
+		if (!defined $downloads || !@$downloads) { $downloads = json_formats_v($data->{formats}, 1, @downloads);};
 	}
 
 	my $json_fn = "$title.json";
@@ -514,32 +562,8 @@ sub json_doDownload($)
 	} else { $json_fn = undef; }
 
 	for my $d (@$downloads) {
-		my $ext = $d->{video_ext};
-		my $suffix = "";
-		if ($d->{vcodec}) {
-			$suffix = length($d->{name})? " - $d->{name}"
-			        : length($d->{language})? " - $d->{language}"
-			        : "";
-		} elsif ($d->{acodec}) {
-			$suffix = length($d->{language})? " - $d->{language}"
-			        : length($d->{name})? " - $d->{name}"
-			        : "";
-		}
-		$ext = $d->{audio_ext} if !defined $ext;
-		$ext .= "v" unless defined $d->{acodec};
-		$ext .= "a" unless defined $d->{vcodec} || $ext eq "m4a";
-		my @ext_audio_arg;
-		$ext_audio_arg[0] = '-x' if $dl_mode eq 'a';
-		my @split_chapter_arg ;
-		$split_chapter_arg[0] = '--split-chapters' if $split_chapters;
-		#my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $data->{webpage_url}];
-		my $cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", $data->{webpage_url}];
-		if ($json_fn) {
-			$cmd = ["yt-dlp", "--output", "$title$suffix.$ext", "-f", $d->{format_id}, @split_chapter_arg, @ext_audio_arg, "--no-playlist", "--load-info-json", $json_fn];
-		}
-		push @$cmds, $cmd;
-
-#		print join(' ', @$cmd), "\n";
+		my %t = download_cmds($d, {title => $title, json_fn => $json_fn, data => $data});
+		@$cmds{keys %t} = values %t;
 	}
 	if (open(my $fd, '>', "$title.txt")) {
 		print $fd "Title: $title\n".
@@ -573,31 +597,31 @@ EOF
 
 	my %normal_subtitles = ();
 
-	if (defined $data->{subtitles} && 1*%{$data->{subtitles}}) {
+	if ($subtitles_lvl > 0 && defined $data->{subtitles} && 1*%{$data->{subtitles}}) {
 		my $sts = $data->{subtitles};
 		for my $st (keys %$sts) {
 			my @cmd = write_captions("$title - $st", $sts->{$st});
 			if (@cmd) {
-				push @$cmds, [@cmd];
+				$cmds->{$cmd[0]} = $cmd[1];
 				$normal_subtitles{$st} = 1;
 			}
 		}
 	}
 
-	if (defined $data->{automatic_captions}) {
+	if ($subtitles_lvl > 1 && defined $data->{automatic_captions}) {
 		my $sts = $data->{automatic_captions};
 		for my $st (keys %$sts) {
 			next if $normal_subtitles{$st};
 			my @cmd = write_captions("$title - $st", $sts->{$st});
 			if (@cmd) {
-				push @$cmds, [@cmd];
+				$cmds->{$cmd[0]} = $cmd[1];
 			}
 		}
 	}
 
 	if (defined $json_fn) {
 		my $cmd = ["/bin/rm", "-f", $json_fn ];
-		push @$cmds, $cmd;
+		push @$cmds2, $cmd;
 	}
 
 	my $tnurl;
@@ -623,19 +647,60 @@ EOF
 		}
 		$ext =~ s/\?.*//;
 		my @cmd = dl_file_cmd("$title$ext", $tnurl);
-		push @$cmds, [@cmd];
+		$cmds->{$cmd[0]}  = $cmd[1];
 	}
 
+	my @skipped;
 	print "\nPreview:\n";
-	for my $c (@$cmds) {
-		print(join(' ', @$c),"\n");
+	for my $k (keys %$cmds) {
+		if (-e $k) {
+			print "test -e ".quoteShell($k)."\n";
+			push(@skipped, $k);
+		} else {
+			print(join(' ', quoteShell(@{$cmds->{$k}})),"\n");
+		}
+	}
+	for my $c (@$cmds2) {
+		print(join(' ', quoteShell(@$c)),"\n");
 	}
 	if (!$dummy_run) {
+		my @failed;
+		my @newfiles;
 		print "\nRun:\n";
-		for my $c (@$cmds) {
-			print(join(' ', @$c),"\n");
+		for my $k (keys %$cmds) {
+			if (! -e $k) {
+				print(join(' ', quoteShell(@{$cmds->{$k}})),"\n");
+				my $ret = system(@{$cmds->{$k}});
+				if ($ret) {
+					print "Downloading ".quoteShell($k)." failed, removing\n";
+					unlink($k);
+					push(@failed, $k);
+				} else {
+					push(@newfiles, $k);
+				}
+				sleep(1);
+			}
+		}
+		for my $c (@$cmds2) {
+			print(join(' ', quoteShell(@$c)),"\n");
 			system(@$c);
 		}
+		if (1*@skipped) {
+			print("\nSkipped files:\n",
+				join("\n", quoteShell(@skipped)),
+				"\n");
+		}
+		if (1*@newfiles) {
+			print("\nNew files:\n",
+				join("\n", quoteShell(@newfiles)),
+				"\n");
+		}
+		if (1*@failed) {
+			print("\nFailed files:\n",
+				join("\n", quoteShell(@failed)),
+				"\n");
+		}
+		print("\n");
 	};
 }
 
