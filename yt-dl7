@@ -387,10 +387,12 @@ sub json_formats_a($;$) {
 			next if !$size && ! ($iteration & 1);
 			# look for size on iterations 0,2,4
 
+			my $is_original = ($name || "") =~ /\boriginal\b/;
 			my $a = {
 				br => $br,
 				name => $name,
 				language => $language,
+				is_original => $is_original,
 				size => $size,
 				format_id => $format_id,
 				audio_ext => $format->{audio_ext},
@@ -513,7 +515,9 @@ sub download_cmds($$) {
 				  : length($d->{language})? " - $d->{language}"
 				  : "";
 	} elsif ($d->{acodec}) {
-		$suffix = length($d->{language})? " - $d->{language}"
+#		$suffix = length($d->{language})? " - $d->{language}"
+		$suffix = length($d->{language})
+		        ? " - $d->{language}" . ($d->{is_original}? " original" : "")
 				  : length($d->{name})? " - $d->{name}"
 				  : "";
 	}
