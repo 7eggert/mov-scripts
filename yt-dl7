@@ -256,7 +256,13 @@ sub json_formats_v($;@) {
 			}
 		}
 	}
-	if ($best_combined) {
+	if ($best_combined
+	&&  (!defined $best_opus
+	  || !defined $best_opus->{languages})
+	&&  (!defined $best_aac
+	  || !defined $best_aac->{languages})
+	&&  (!defined $best_aac_drc
+	  || !defined $best_aac_drc->{languages})) {
 		if (!defined $best_video
 		|| $best_video->{h} <= $best_combined->{h}) {
 			push(@$auto, $best_combined);
@@ -287,6 +293,7 @@ sub json_formats_v($;@) {
 	} else { # now $h <= 1080
 		$doaac = 1;
 	}
+	$doopus = 1 if !defined $best_aac && !defined $best_aac_drc;
 	if ($doopus) {
 		if ($best_opus) {
 			push(@$auto, $best_opus)
@@ -300,7 +307,7 @@ sub json_formats_v($;@) {
 	}
 	done:
 	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined, $auto],
-		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 0;
+		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 1;
 	return $auto unless wantarray;
 	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
 }
