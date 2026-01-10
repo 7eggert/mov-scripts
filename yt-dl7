@@ -307,7 +307,7 @@ sub json_formats_v($;@) {
 	}
 	done:
 	print Data::Dumper->Dump([$best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined, $auto],
-		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 1;
+		[qw(best_aac best_aac_drc best_opus best_video video_1440p video_1080p best_combined auto)]) if 0;
 	return $auto unless wantarray;
 	return ($auto, $best_aac, $best_aac_drc, $best_opus, $best_video, $video_1440p, $video_1080p, $best_combined);
 }
