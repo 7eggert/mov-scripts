@@ -69,6 +69,12 @@ sub  quoteShell(@)
 	return $ret[0];
 }
 
+sub defined_less_than($$) {
+	return 0 if !defined $_[0];
+	return 0 if !defined $_[1];
+	return ($_[0] < $_[1]);
+}
+
 sub better_codec_1080($$)
 # no vp9 support on many devices
 # 1 = new is better, -1 == old is better, 0 == unknown
@@ -244,7 +250,7 @@ sub json_formats_v($;@) {
 				if (!defined $best_combined || !(1*%$best_combined)
 				|| $best_combined->{h} < $h
 				|| $better > 0
-				|| $better == 0 && $best_combined->{size} < $size) {
+				|| $better == 0 && defined_less_than($best_combined->{size}, $size)) {
 					$best_combined = $av;
 				}
 			}
@@ -481,6 +487,7 @@ sub write_captions($$)
 	return ();
 }
 
+sub download_cmds($$);
 sub download_cmds($$) {
 	my %cmds = ();
 	my ($d, $v) = @_;
@@ -715,8 +722,8 @@ sub json_playlist($)
 
 for my $f (@ARGV) {
 	my $vdatafd;
-	if ($f =~ /^json:(.*)/) {
-		if (!open($vdatafd, "<", $1)) {
+	if (($f =~ /\.json$/i && -f $f) || $f =~ s/^json://i) {
+		if (!open($vdatafd, "<:raw", $f)) {
 			print STDERR "Can't open $f for reading: $!\n";
 			next;
 		}
@@ -733,7 +740,11 @@ for my $f (@ARGV) {
 			next;
 		}
 	};
-	my $json = <$vdatafd>;
+		my $json;
+	{
+		local $/ = undef;
+		$json = <$vdatafd>;
+	}
 	close($vdatafd);
 
 	my $data = $JSON->decode($json);
