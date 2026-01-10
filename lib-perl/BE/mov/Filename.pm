@@ -40,7 +40,7 @@ our @EXPORT_OK;
 #my %secret_hash = ();
 
 
-my $lang1re = qr/[a-z]{2}(?:\+H)?|many/;
+my $lang1re = qr/[a-z]{2}(?:-[A-Z]{2})?(?:\+H)?|many/;
 my $langre = qr/$lang1re(?:,$lang1re)*/;
 my %res_k = ( 4096 => "4k" );
 my $extrare = qr/^(?:Fehler|Soundfehler|Colorized|Koloriert|DEFA|DVBT||LIVE|TV)$/;
