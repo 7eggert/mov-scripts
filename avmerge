@@ -164,14 +164,14 @@ for my $f (@ARGV) {
 				$s = $lang_audio[0];
 				shift @lang_audio if !$one_lang;
 			};
-			if ($s =~ /^[a-z]{2}$/) {
+			if ($s =~ /^([a-z]{2})(?:-[A-Z]{2})?$/) {
 				push(@{$fn->{lang}}, $s);
 				push(@la, $s);
-				if (defined $Languages{$s}) {
+				if (defined $Languages{$1}) {
 					push(@cmd_meta, "-metadata:s:a:$ffaudioidx",
-						 "title=$Languages{$s}{name}",
+						"title=$Languages{$1}{name}",
 						"-metadata:s:a:$ffaudioidx",
-						 "language=$Languages{$s}{code3}");
+						"language=$Languages{$1}{code3}");
 				} else {
 					goto default_lang;
 				}
