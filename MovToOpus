@@ -1,0 +1,156 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use BE::mov::Filename;
+use Getopt::Long qw(:config bundling);
+use File::stat;
+use File::Path qw/ make_path /;
+use File::Touch;
+my $touch_obj = File::Touch->new(no_create => 1 );
+#use Data::Dumper;
+
+sub help()
+{
+	print <<EOF;
+$0 [options] file_prefix [file_prefix] ...
+
+file_prefix: Name of the file to be merged
+             (an extension is automatically removed)
+
+Options:
+  -h --help       This text
+  -D --destdir    destination directory
+                  (./foo/bar.mkv -> \$destprefix/./bar.mkv)
+  -P --destprefix destination directory
+                  (./foo/bar.mkv -> \$destprefix/./foo/bar.mkv)
+  -f --force      refresh even newer target files
+  -n --noop       Don't execute the merge commands, just print them
+  -t --touch      touch existing files (even if noop is specified)
+  -v --verbose    be verbose
+  
+The temp file will be named "foo.opus.opus" in the target directory.
+EOF
+}
+
+my $D='.';
+my $P;
+my $force;
+my $verbose;
+my $noop;
+my $do_touch;
+
+GetOptions(
+	"h|help"         => \&help,
+	"D|destdir=s"    => \$D,
+	"P|destprefix=s" => \$P,
+	"f|force"        => \$force,
+	"n|noop"         => \$noop,
+	"t|touch"        => \$do_touch,
+	"v|verbose"      => \$verbose,
+) || exit(1);
+
+
+
+use IPC::Open3;
+use Symbol;
+
+exit(0) if (-f "/var/run/shutdown");
+
+for my $f (@ARGV) {
+	my $fn = BE::mov::Filename->new($f, vheight => 1);
+#	print Data::Dumper->Dump([$fn], [qw(fn)]);
+	$fn->newname();
+	my $g = join(' - ', @{$fn->{name_new}});
+	my $G = "$D/$g.opus";
+	my $G3 = "$D/$g.mp3";
+	my $d = $fn->{dir};
+	$G = "$P/$d/$g.opus" if defined $P;
+	$G3 = "P/$d/$g.mp3" if defined $P;
+	#print "target: $G\n" if $verbose;
+	
+	my $fs;
+	my $gs;
+	my $gs3;
+	if (! $force) {
+		$gs = stat($G);
+		if ($gs) {
+			$fs = stat($f);
+			if ($gs->mtime > $fs->mtime) {
+					print "up-to-date: $G\n" if $verbose;
+					$touch_obj->touch($G) if $do_touch;
+				next;
+			} else {
+				print "refreshing $G\n" if $verbose;
+			}
+		} else {
+			$gs3 = stat($G3);
+			if ($gs3) {
+				$fs = stat($f);
+				if ($gs3->mtime > $fs->mtime) {
+					print "up-to-date: $G3\n" if $verbose;
+					$touch_obj->touch($G3) if $do_touch;
+					next;
+				} else {
+					print "refreshing $G3\n" if $verbose;
+				}
+			}
+		}
+	} else {
+		$gs3 = stat($G3); # if there is an mp3 file it will be removed on success
+	}
+	
+	my $stream;
+	for my $s (@{$fn->{json}{streams}}) {
+		if ($s->{codec_type} eq 'audio') {
+			$stream = $s;
+			last;
+		}
+	}
+	my @cmd2;
+	if (($stream->{'codec_name'}||'') eq 'opus') {
+		@cmd2 = ( "-c", "copy" )
+	} else {
+		# empty, ffmpeg will figure it out
+	}
+	my @cmd = ('ffmpeg', '-hide_banner', '-i', $f, @cmd2, "-metadata:s:a:0", "title=$g", "$G.opus"); # extra ".opus"
+	print join(' ', @cmd), "\n" if $verbose;
+	
+	next if $noop;
+	if (defined $P) {
+		make_path("$P/$d",{error => \my $err});
+		if ($err && @$err) {
+			for my $diag (@$err) {
+				my ($file, $message) = %$diag;
+				if ($file eq '') {
+					print "general error: $message\n";
+				} else {
+					print "mkdir $file: $message\n";
+				}
+			}
+			next;
+		}
+	}
+	my $res = system {$cmd[0]} (@cmd);
+	if ($res) {
+		if (unlink("$G.opus")) {
+			print "removed temporary after failed recode: $G.opus\n" if $verbose;
+		} else {
+			print "failed to remove after failed recode: $G.opus\n";
+		}
+	} else {
+		if (rename("$G.opus", $G)) {
+			print "renamed '$G.opus' to '$G'\n" if $verbose;
+		} else {
+			print "failed to rename '$G.opus' to '$G'\n";
+		}
+		if ($gs3) { # mp3 file did exist and was updated
+			if (unlink("$G3")) {
+				print "removed old file: $G3\n" if $verbose;
+			} else {
+				print "failed to remove old file: $G3\n";
+			}
+		}
+	}
+	last if (-f "/var/run/shutdown");
+}

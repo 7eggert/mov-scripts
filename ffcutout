@@ -1,0 +1,158 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+
+=rem
+ffmpeg -i OverheadCam.mp4 -filter_complex "
+[0:v]split=3[copy1][copy2][copy3],
+[copy1]trim=10:20,setpts=PTS-STARTPTS[part1],
+[copy2]trim=30:40,setpts=PTS-STARTPTS[part2],
+[copy3]trim=60:80,setpts=PTS-STARTPTS[part3],
+[part1][part2][part3]concat=n=3[out]" -map "[out]" out.mp4
+=cut
+
+my $timere      = qr/(?:(?:(\d+):)?(\d+):)?(\d+)(?:\.(\d+))?/;
+my $timerangere = qr/^(?:($timere))?-(?:($timere))?$/;
+
+my @files = ();
+my @ranges = ();
+my @keepranges;
+
+for (my $i=0; $i<@ARGV;) {
+	my $a = $ARGV[$i];
+	if ($a =~ $timerangere) {
+		my @match = ($a, @{^CAPTURE});
+#		print (join(', ', @match), "\n");
+		push(@ranges, [@match]);
+		++$i;
+	} elsif (-e $a) {
+		if (@files > 1) {
+			print "too many file names on command line (\"$a\")\n";
+			exit(1);
+		} else {
+			my $s = splice(@ARGV,$i, 1);
+			#print("<<<$s\n");
+			push(@files, $s);
+		}
+	} else {
+		if (@files > 1) {
+			print "too many file names on command line (\"$a\")\n";
+			exit(1);
+		} elsif (!@files) {
+			print STDERR "input file $a must exist\n";
+			exit(1);
+		} else {
+			my $s = splice(@ARGV,$i, 1);
+			#print(">>>$s\n");
+			push(@files, $s);
+		}
+	}
+}
+
+if (!@files) {
+	print "Found no file names on the command line\n";
+	exit(1);
+}
+
+if (1 == @files) {
+	$files[1] = $files[0].".ffcutout.mkv";
+}
+
+
+if (!@ranges) {
+	print "Found no range on the command line\n";
+	exit(1);
+}
+
+{
+	my $x = $ranges[0];
+	if (!defined $x->[1]) {
+		$x->[1] = $x->[2] = $x->[3] = $x->[4] = $x->[5] = 0;
+	}
+	$x = $ranges[@ranges - 1];
+	if (!defined $x->[6]) {
+		$x->[6] = $x->[7] = $x->[8] = $x->[9] = $x->[10] = 0;
+	}
+}
+
+	
+for (my $i=0; $i < @ranges; $i++) {
+	my $x = $ranges[$i];
+	if (!defined $x->[1]
+	||  !defined $x->[6]) {
+		print "open ranges are only supported at the beginning and at the end.\n".
+		"Found $x->[0] parses as open range\n";
+		exit(1);
+	}
+	for my $j (2,3,4,5,7,8,9,10) {
+		$x->[$j] = 0 unless defined $x->[$j];
+	}
+}
+
+
+sub begin($) {
+	my $x = shift;
+	my $secs = $x->[2] * 60*60
+	         + $x->[3] * 60
+	         + $x->[4];
+	my $frac = $x->[5];
+	return "".$secs.".".$frac if (0+$frac);
+	return $secs;
+}
+
+sub end($) {
+	my $x = shift;
+	my $secs = $x->[7] * 60*60
+	         + $x->[8] * 60
+	         + $x->[9];
+	my $frac = $x->[10];
+	return "".$secs.".".$frac if (0+$frac);
+	return $secs;
+}
+
+{
+	my $x = begin($ranges[0]);
+	if ($x != 0) {
+		push(@keepranges, "end=$x");
+	}
+	
+	$x = end($ranges[0]);
+	for (my $i=1; $i < @ranges; $i++) {
+		my $y = begin($ranges[$i]);
+		push(@keepranges, "start=$x:end=$y");
+		$x = end($ranges[$i]);
+	}
+	
+	if ($x != 0) {
+		push(@keepranges, "start=$x");
+	}
+}
+
+=ver1
+my $filter_complex = "[0]split=".(1*@keepranges);
+for (my $i=0; $i<@keepranges; ++$i) {$filter_complex .= "[x$i]"};
+$filter_complex .=  ",\n";
+for(my $i=0; $i<@keepranges; ++$i) {$filter_complex .= "[x$i]trim=$keepranges[$i],setpts=PTS-STARTPTS[y$i],\n"};
+for(my $i=0; $i<@keepranges; ++$i) {$filter_complex .= "[y$i]"};
+$filter_complex .= "concat=n=".(1*@keepranges)."[out]\n";
+=cut
+my $filter_complex = "\n";
+for(my $i=0; $i<@keepranges; ++$i) {
+	$filter_complex .= "[0]trim=${keepranges[$i]},setpts=PTS-STARTPTS[x$i],\n"
+	                .  "[0]atrim=${keepranges[$i]},asetpts=PTS-STARTPTS[y$i],\n";
+}
+#for(my $i=0; $i<@keepranges; ++$i) {$filter_complex .= "[x$i]"};
+#$filter_complex .= "concat=n=".(1*@keepranges)."[vout];\n";
+#for(my $i=0; $i<@keepranges; ++$i) {$filter_complex .= "[y$i]"};
+#$filter_complex .= "concat=n=".(1*@keepranges)."[aout];\n";
+
+for(my $i=0; $i<@keepranges; ++$i) {$filter_complex .= "[x$i][y$i]"};
+$filter_complex .= "concat=n=".(1*@keepranges).":v=1:a=1[v][a]\n";
+
+
+my @cmd = ("ffmpeg", "-hide_banner", "-i", $files[0], "-filter_complex", $filter_complex,
+           "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", $files[1]);
+
+print(join(' ', @cmd),"\n");
+
+exec {$cmd[0]} (@cmd);
